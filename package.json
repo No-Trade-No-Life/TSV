@@ -1,0 +1,27 @@
+{
+  "name": "tsv",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "6.0.0",
+    "hyparquet": "1.26.2",
+    "hyparquet-compressors": "1.1.1",
+    "lightweight-charts": "5.2.0",
+    "papaparse": "5.5.3",
+    "react": "19.2.3",
+    "react-dom": "19.2.3"
+  },
+  "devDependencies": {
+    "@types/papaparse": "5.3.16",
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.2.3",
+    "typescript": "5.9.3",
+    "vite": "8.1.5"
+  }
+}
