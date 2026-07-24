@@ -21,10 +21,16 @@ const timeRows = (rows: Row[], column: string) =>
     .sort((a, b) => a.time - b.time);
 
 const valuePoints = (rows: Row[], timeColumn: string, valueColumn?: string) =>
-  timeRows(rows, timeColumn).flatMap(({ row, time }) => {
+  uniqueTimes(timeRows(rows, timeColumn).flatMap(({ row, time }) => {
     const value = parseNumber(row[valueColumn ?? '']);
     return value === undefined ? [] : [{ time: time as Time, value }];
-  });
+  }));
+
+const uniqueTimes = <T extends { time: Time }>(points: T[]) => {
+  const latestByTime = new Map<number, T>();
+  points.forEach((point) => latestByTime.set(Number(point.time), point));
+  return [...latestByTime.values()].sort((left, right) => Number(left.time) - Number(right.time));
+};
 
 const addMapping = (chart: IChartApi, dataset: Dataset, config: ViewerConfig, mapping: Mapping) => {
   const rows = timeRows(dataset.rows, config.timeColumn);
@@ -32,13 +38,13 @@ const addMapping = (chart: IChartApi, dataset: Dataset, config: ViewerConfig, ma
     const series = chart.addSeries(CandlestickSeries, {
       upColor: '#c6dd62', downColor: '#ef7e76', borderVisible: false, wickUpColor: '#c6dd62', wickDownColor: '#ef7e76', title: mapping.name,
     });
-    series.setData(rows.flatMap(({ row, time }) => {
+    series.setData(uniqueTimes(rows.flatMap(({ row, time }) => {
       const open = parseNumber(row[mapping.openColumn ?? '']);
       const high = parseNumber(row[mapping.highColumn ?? '']);
       const low = parseNumber(row[mapping.lowColumn ?? '']);
       const close = parseNumber(row[mapping.closeColumn ?? '']);
       return open === undefined || high === undefined || low === undefined || close === undefined ? [] : [{ time: time as Time, open, high, low, close }];
-    }));
+    })));
     return;
   }
   if (mapping.kind === 'histogram') {
@@ -56,18 +62,27 @@ const addMapping = (chart: IChartApi, dataset: Dataset, config: ViewerConfig, ma
     }));
     return;
   }
-  const series = chart.addSeries(LineSeries, { color: mapping.color, lineWidth: 2, title: mapping.name });
   if (mapping.kind === 'segment') {
-    const points = rows.flatMap(({ row, time }) => {
+    rows.forEach(({ row, time }, index) => {
       const startValue = parseNumber(row[mapping.valueColumn ?? '']);
       const endTime = parseTime(row[mapping.endTimeColumn ?? '']);
       const endValue = parseNumber(row[mapping.endValueColumn ?? '']);
-      if (startValue === undefined || endTime === undefined || endValue === undefined) return [];
-      return [{ time: time as Time, value: startValue }, { time: endTime as Time, value: endValue }];
-    }).sort((a, b) => Number(a.time) - Number(b.time));
-    series.setData(points);
+      if (startValue === undefined || endTime === undefined || endValue === undefined || endTime === time) return;
+      const series = chart.addSeries(LineSeries, {
+        color: mapping.color,
+        lineWidth: 2,
+        lastValueVisible: false,
+        priceLineVisible: false,
+        title: index === 0 ? mapping.name : '',
+      });
+      series.setData([
+        { time: Math.min(time, endTime) as Time, value: time < endTime ? startValue : endValue },
+        { time: Math.max(time, endTime) as Time, value: time < endTime ? endValue : startValue },
+      ]);
+    });
     return;
   }
+  const series = chart.addSeries(LineSeries, { color: mapping.color, lineWidth: 2, title: mapping.name });
   series.setData(valuePoints(dataset.rows, config.timeColumn, mapping.valueColumn));
 };
 

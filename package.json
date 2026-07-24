@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "test": "vitest run",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -21,7 +22,9 @@
     "@types/papaparse": "5.3.16",
     "@types/react": "19.2.7",
     "@types/react-dom": "19.2.3",
+    "hyparquet-writer": "^0.16.1",
     "typescript": "5.9.3",
-    "vite": "8.1.5"
+    "vite": "8.1.5",
+    "vitest": "^4.1.0"
   }
 }
