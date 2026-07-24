@@ -11,13 +11,9 @@ const normaliseRows = (rows: Row[]) =>
 export const readDataset = async (file: File): Promise<Dataset> => {
   const filename = file.name.toLowerCase();
   if (filename.endsWith('.csv')) {
-    const result = await new Promise<Papa.ParseResult<Row>>((resolve, reject) => {
-      Papa.parse<Row>(file, {
-        header: true,
-        skipEmptyLines: 'greedy',
-        complete: resolve,
-        error: reject,
-      });
+    const result = Papa.parse<Row>(await file.text(), {
+      header: true,
+      skipEmptyLines: 'greedy',
     });
     if (result.errors.length > 0) throw new Error(`CSV 解析失败：${result.errors[0].message}`);
     const rows = normaliseRows(result.data);
@@ -68,6 +64,11 @@ export const createMapping = (kind: Mapping['kind'], index: number): Mapping => 
 };
 
 export const parseTime = (value: unknown): number | undefined => {
+  if (value instanceof Date && Number.isFinite(value.getTime())) return Math.floor(value.getTime() / 1000);
+  if (typeof value === 'bigint') {
+    const numericValue = Number(value);
+    return Number.isSafeInteger(numericValue) ? Math.floor(numericValue > 10_000_000_000 ? numericValue / 1000 : numericValue) : undefined;
+  }
   if (typeof value === 'number' && Number.isFinite(value)) return Math.floor(value > 10_000_000_000 ? value / 1000 : value);
   if (typeof value === 'string') {
     const numberValue = Number(value);
