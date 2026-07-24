@@ -1,0 +1,92 @@
+import { useEffect, useRef } from 'react';
+import {
+  CandlestickSeries,
+  ColorType,
+  HistogramSeries,
+  LineSeries,
+  createChart,
+  createSeriesMarkers,
+  type IChartApi,
+  type Time,
+} from 'lightweight-charts';
+import { parseNumber, parseTime } from './data';
+import type { Dataset, Mapping, Row, ViewerConfig } from './types';
+
+type Props = { dataset: Dataset; config: ViewerConfig };
+
+const timeRows = (rows: Row[], column: string) =>
+  rows
+    .map((row) => ({ row, time: parseTime(row[column]) }))
+    .filter((item): item is { row: Row; time: number } => item.time !== undefined)
+    .sort((a, b) => a.time - b.time);
+
+const valuePoints = (rows: Row[], timeColumn: string, valueColumn?: string) =>
+  timeRows(rows, timeColumn).flatMap(({ row, time }) => {
+    const value = parseNumber(row[valueColumn ?? '']);
+    return value === undefined ? [] : [{ time: time as Time, value }];
+  });
+
+const addMapping = (chart: IChartApi, dataset: Dataset, config: ViewerConfig, mapping: Mapping) => {
+  const rows = timeRows(dataset.rows, config.timeColumn);
+  if (mapping.kind === 'candlestick') {
+    const series = chart.addSeries(CandlestickSeries, {
+      upColor: '#c6dd62', downColor: '#ef7e76', borderVisible: false, wickUpColor: '#c6dd62', wickDownColor: '#ef7e76', title: mapping.name,
+    });
+    series.setData(rows.flatMap(({ row, time }) => {
+      const open = parseNumber(row[mapping.openColumn ?? '']);
+      const high = parseNumber(row[mapping.highColumn ?? '']);
+      const low = parseNumber(row[mapping.lowColumn ?? '']);
+      const close = parseNumber(row[mapping.closeColumn ?? '']);
+      return open === undefined || high === undefined || low === undefined || close === undefined ? [] : [{ time: time as Time, open, high, low, close }];
+    }));
+    return;
+  }
+  if (mapping.kind === 'histogram') {
+    const series = chart.addSeries(HistogramSeries, { color: mapping.color, title: mapping.name, priceFormat: { type: 'price', precision: 4, minMove: 0.0001 } });
+    series.setData(valuePoints(dataset.rows, config.timeColumn, mapping.valueColumn));
+    return;
+  }
+  if (mapping.kind === 'markers') {
+    const series = chart.addSeries(LineSeries, { color: 'rgba(0,0,0,0)', lineVisible: false, lastValueVisible: false, priceLineVisible: false, title: mapping.name });
+    const points = valuePoints(dataset.rows, config.timeColumn, mapping.valueColumn);
+    series.setData(points);
+    createSeriesMarkers(series, rows.flatMap(({ row, time }) => {
+      const value = parseNumber(row[mapping.valueColumn ?? '']);
+      return value === undefined ? [] : [{ time: time as Time, position: 'inBar' as const, color: mapping.color, shape: 'circle' as const, text: String(row[mapping.textColumn ?? ''] ?? mapping.name) }];
+    }));
+    return;
+  }
+  const series = chart.addSeries(LineSeries, { color: mapping.color, lineWidth: 2, title: mapping.name });
+  if (mapping.kind === 'segment') {
+    const points = rows.flatMap(({ row, time }) => {
+      const startValue = parseNumber(row[mapping.valueColumn ?? '']);
+      const endTime = parseTime(row[mapping.endTimeColumn ?? '']);
+      const endValue = parseNumber(row[mapping.endValueColumn ?? '']);
+      if (startValue === undefined || endTime === undefined || endValue === undefined) return [];
+      return [{ time: time as Time, value: startValue }, { time: endTime as Time, value: endValue }];
+    }).sort((a, b) => Number(a.time) - Number(b.time));
+    series.setData(points);
+    return;
+  }
+  series.setData(valuePoints(dataset.rows, config.timeColumn, mapping.valueColumn));
+};
+
+export const Chart = ({ dataset, config }: Props) => {
+  const host = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!host.current) return undefined;
+    const chart = createChart(host.current, {
+      autoSize: true,
+      height: 560,
+      layout: { background: { type: ColorType.Solid, color: '#11140f' }, textColor: '#d9dfd2', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' },
+      grid: { vertLines: { color: '#242a21' }, horzLines: { color: '#242a21' } },
+      rightPriceScale: { borderColor: '#3b4237' },
+      timeScale: { borderColor: '#3b4237', timeVisible: true, secondsVisible: false },
+      crosshair: { vertLine: { color: '#c6dd6266' }, horzLine: { color: '#c6dd6266' } },
+    });
+    config.mappings.forEach((item) => addMapping(chart, dataset, config, item));
+    chart.timeScale().fitContent();
+    return () => chart.remove();
+  }, [dataset, config]);
+  return <div className="chart-host" ref={host} aria-label="时间序列图表" />;
+};
