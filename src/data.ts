@@ -91,5 +91,17 @@ export const readConfig = (text: string): ViewerConfig => {
   if (parsed.version !== 1 || !Array.isArray(parsed.mappings) || typeof parsed.timeColumn !== 'string') {
     throw new Error('这不是 TSV v1 图表配置。');
   }
-  return parsed;
+  const mappingKinds: Mapping['kind'][] = ['candlestick', 'line', 'histogram', 'markers', 'segment'];
+  if (parsed.mappings.some((mapping) => !mappingKinds.includes(mapping.kind))) {
+    throw new Error('配置包含不支持的图形类型。');
+  }
+  return {
+    ...parsed,
+    mappings: parsed.mappings.map((item, index) => ({
+      ...item,
+      id: typeof item.id === 'string' && item.id ? item.id : id(),
+      name: typeof item.name === 'string' && item.name ? item.name : `序列 ${index + 1}`,
+      color: typeof item.color === 'string' && item.color ? item.color : colorFor(index),
+    })),
+  };
 };

@@ -41,5 +41,12 @@ describe('图表配置', () => {
     const original = createInitialConfig(['date', 'open', 'high', 'low', 'close']);
     expect(readConfig(toJson(original))).toEqual(original);
     expect(() => readConfig('{"version":2}')).toThrow('TSV v1');
+    expect(() => readConfig('{"version":1,"timeColumn":"date","mappings":[{"kind":"scatter"}]}')).toThrow('不支持');
+  });
+
+  it('为手写配置补齐编辑所需的元数据', () => {
+    const config = readConfig('{"version":1,"timeColumn":"date","mappings":[{"kind":"line","valueColumn":"close"}]}');
+
+    expect(config.mappings[0]).toMatchObject({ kind: 'line', name: '序列 1', color: expect.any(String), id: expect.any(String) });
   });
 });
