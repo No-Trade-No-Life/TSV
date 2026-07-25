@@ -18,12 +18,15 @@ export type Mapping = {
   textColumn?: string;
 };
 
+export type DataFileConfig = {
+  id: string;
+  filename: string;
+  timeColumn: string;
+};
+
 export type ViewerConfig = {
-  version: 2;
-  sources: Array<{
-    id: string;
-    timeColumn: string;
-  }>;
+  version: 3;
+  data: DataFileConfig[];
   mappings: Mapping[];
 };
 

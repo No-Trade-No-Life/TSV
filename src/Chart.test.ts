@@ -9,8 +9,8 @@ describe('多数据源图层解析', () => {
       { id: 'signal.csv', fileName: 'signal.csv', format: 'CSV', columns: ['timestamp', 'signal'], rows: [] },
     ];
     const config: ViewerConfig = {
-      version: 2,
-      sources: [{ id: 'price.csv', timeColumn: 'date' }, { id: 'signal.csv', timeColumn: 'timestamp' }],
+      version: 3,
+      data: [{ id: 'price.csv', filename: 'price.csv', timeColumn: 'date' }, { id: 'signal.csv', filename: 'signal.csv', timeColumn: 'timestamp' }],
       mappings: [
         { id: 'price', sourceId: 'price.csv', kind: 'line', name: '收盘价', color: '#c6dd62', valueColumn: 'close' },
         { id: 'signal', sourceId: 'signal.csv', kind: 'markers', name: '信号', color: '#72c7e8', valueColumn: 'signal' },

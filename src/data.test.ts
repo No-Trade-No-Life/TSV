@@ -13,7 +13,7 @@ describe('本地数据读取', () => {
 
     expect(dataset.format).toBe('CSV');
     expect(dataset.rows).toHaveLength(1);
-    expect(config.sources).toEqual([{ id: 'candles.csv', timeColumn: 'timestamp' }]);
+    expect(config.data).toEqual([{ id: 'candles.csv', filename: 'candles.csv', timeColumn: 'timestamp' }]);
     expect(config.mappings).toMatchObject([{ sourceId: 'candles.csv', kind: 'candlestick', openColumn: 'open', closeColumn: 'close' }]);
   });
 
@@ -43,13 +43,13 @@ describe('图表配置', () => {
       { id: 'signal.csv', fileName: 'signal.csv', format: 'CSV', rows: [], columns: ['timestamp', 'signal'] },
     ]);
     expect(readConfig(toJson(original))).toEqual(original);
-    expect(original.sources).toEqual([{ id: 'price.csv', timeColumn: 'date' }, { id: 'signal.csv', timeColumn: 'timestamp' }]);
-    expect(() => readConfig('{"version":1}')).toThrow('TSV v2');
-    expect(() => readConfig('{"version":2,"sources":[],"mappings":[{"kind":"scatter","sourceId":"x"}]}')).toThrow('不支持');
+    expect(original.data).toEqual([{ id: 'price.csv', filename: 'price.csv', timeColumn: 'date' }, { id: 'signal.csv', filename: 'signal.csv', timeColumn: 'timestamp' }]);
+    expect(() => readConfig('{"version":1}')).toThrow('TSV v3');
+    expect(() => readConfig('{"version":3,"data":[],"mappings":[{"kind":"scatter","sourceId":"x"}]}')).toThrow('不支持');
   });
 
   it('为手写配置补齐编辑所需的元数据', () => {
-    const config = readConfig('{"version":2,"sources":[{"id":"price.csv","timeColumn":"date"}],"mappings":[{"kind":"line","sourceId":"price.csv","valueColumn":"close"}]}');
+    const config = readConfig('{"version":3,"data":[{"id":"price","filename":"price.csv","timeColumn":"date"}],"mappings":[{"kind":"line","sourceId":"price","valueColumn":"close"}]}');
 
     expect(config.mappings[0]).toMatchObject({ kind: 'line', name: '序列 1', color: expect.any(String), id: expect.any(String) });
   });
@@ -57,5 +57,10 @@ describe('图表配置', () => {
   it('为重复文件名生成确定且不冲突的数据源标识', () => {
     const files = [new File(['a'], 'ticks.csv'), new File(['b'], 'ticks.csv'), new File(['c'], 'orders.csv')];
     expect(sourceIdsFor(files as unknown as globalThis.File[])).toEqual(['ticks.csv', 'ticks.csv (2)', 'orders.csv']);
+  });
+
+  it('拒绝重复文件名和不存在的数据源引用', () => {
+    expect(() => readConfig('{"version":3,"data":[{"id":"one","filename":"same.csv","timeColumn":"time"},{"id":"two","filename":"same.csv","timeColumn":"time"}],"mappings":[]}')).toThrow('重复的文件名');
+    expect(() => readConfig('{"version":3,"data":[{"id":"one","filename":"one.csv","timeColumn":"time"}],"mappings":[{"kind":"line","sourceId":"two"}]}')).toThrow('不存在的数据源');
   });
 });

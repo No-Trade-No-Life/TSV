@@ -11,27 +11,29 @@ npm run dev
 
 ## 数据与图表配置
 
-一次可加载多个文件；每个数据源独立指定时间列，再为图层选择来源文件与数据列。配置可以导出为 JSON，并在下次加载相同文件名的数据文件后重新导入。当前支持：OHLC 蜡烛图、折线、柱状图、标记和线段。
+左侧的“数据文件”直接管理 JSON 的 `data` 数组：可新增、编辑或删除数据文件条目。每项都有稳定的 `id`、用于绑定本地文件的 `filename`，以及自己的 `timeColumn`。图层通过 `sourceId` 引用这些条目；只有对应文件已绑定后才会显示列选择器。删除数据文件会一并删除其图层和内存中的本地数据。
+
+当 `data` 为空时，首次多选 CSV/Parquet 会自动生成该清单。当 `data` 已存在时，选择的文件必须与 `filename` 匹配，浏览器才会把文件绑定到该条目的 `id`。JSON 可以先导入、文件稍后再选；JSON 永远不保存绝对路径或文件内容。
 
 导出的 JSON 是图表元数据。它不保存文件内容或文件路径，因此不会扩大浏览器对本机文件的访问范围。核心结构如下：
 
 ```json
 {
-  "version": 2,
-  "sources": [
-    { "id": "price.parquet", "timeColumn": "date" },
-    { "id": "signals.csv", "timeColumn": "timestamp" }
+  "version": 3,
+  "data": [
+    { "id": "price", "filename": "price.parquet", "timeColumn": "date" },
+    { "id": "signals", "filename": "signals.csv", "timeColumn": "timestamp" }
   ],
   "mappings": [
-    { "id": "ohlc", "sourceId": "price.parquet", "kind": "candlestick", "name": "价格", "color": "#c6dd62", "openColumn": "open", "highColumn": "high", "lowColumn": "low", "closeColumn": "close" },
-    { "id": "volume", "sourceId": "price.parquet", "kind": "histogram", "name": "成交量", "color": "#72c7e8", "valueColumn": "volume" },
-    { "id": "signal", "sourceId": "signals.csv", "kind": "markers", "name": "信号", "color": "#ea9c62", "valueColumn": "price", "textColumn": "signal" },
-    { "id": "plan", "sourceId": "signals.csv", "kind": "segment", "name": "计划线", "color": "#c5a0eb", "valueColumn": "entry", "endTimeColumn": "exit_time", "endValueColumn": "exit" }
+    { "id": "ohlc", "sourceId": "price", "kind": "candlestick", "name": "价格", "color": "#c6dd62", "openColumn": "open", "highColumn": "high", "lowColumn": "low", "closeColumn": "close" },
+    { "id": "volume", "sourceId": "price", "kind": "histogram", "name": "成交量", "color": "#72c7e8", "valueColumn": "volume" },
+    { "id": "signal", "sourceId": "signals", "kind": "markers", "name": "信号", "color": "#ea9c62", "valueColumn": "price", "textColumn": "signal" },
+    { "id": "plan", "sourceId": "signals", "kind": "segment", "name": "计划线", "color": "#c5a0eb", "valueColumn": "entry", "endTimeColumn": "exit_time", "endValueColumn": "exit" }
   ]
 }
 ```
 
-`sources[].id` 在浏览器中默认使用文件名，`mappings[].sourceId` 决定该图层读哪个文件；每一个源使用自己的 `timeColumn`。线段将该源一行中的时间列与 `endTimeColumn` 相连，并使用 `valueColumn` 与 `endValueColumn` 作为两端数值。导入时缺失的 `id`、名称或颜色会自动补齐；未知图形类型会被拒绝。
+`data[].id` 是图层的稳定引用，`data[].filename` 是浏览器选择本地文件时的匹配契约，`mappings[].sourceId` 决定图层读哪个文件；每一个源使用自己的 `timeColumn`。线段将该源一行中的时间列与 `endTimeColumn` 相连，并使用 `valueColumn` 与 `endValueColumn` 作为两端数值。导入时缺失的图层 `id`、名称或颜色会自动补齐；未知图形类型、重复 ID/文件名或不存在的数据源引用会被拒绝。
 
 ## 部署
 
