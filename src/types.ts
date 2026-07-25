@@ -4,6 +4,7 @@ export type MappingKind = 'candlestick' | 'line' | 'histogram' | 'markers' | 'se
 
 export type Mapping = {
   id: string;
+  sourceId: string;
   kind: MappingKind;
   name: string;
   color: string;
@@ -18,12 +19,16 @@ export type Mapping = {
 };
 
 export type ViewerConfig = {
-  version: 1;
-  timeColumn: string;
+  version: 2;
+  sources: Array<{
+    id: string;
+    timeColumn: string;
+  }>;
   mappings: Mapping[];
 };
 
 export type Dataset = {
+  id: string;
   fileName: string;
   format: 'CSV' | 'Parquet';
   rows: Row[];
