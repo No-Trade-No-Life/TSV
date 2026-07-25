@@ -63,4 +63,8 @@ describe('图表配置', () => {
     expect(() => readConfig('{"version":3,"data":[{"id":"one","filename":"same.csv","timeColumn":"time"},{"id":"two","filename":"same.csv","timeColumn":"time"}],"mappings":[]}')).toThrow('重复的文件名');
     expect(() => readConfig('{"version":3,"data":[{"id":"one","filename":"one.csv","timeColumn":"time"}],"mappings":[{"kind":"line","sourceId":"two"}]}')).toThrow('不存在的数据源');
   });
+
+  it('允许尚未选择工作区路径的数据文件模板', () => {
+    expect(readConfig('{"version":3,"data":[{"id":"price","filename":"","timeColumn":""}],"mappings":[]}')).toMatchObject({ data: [{ id: 'price', filename: '' }] });
+  });
 });

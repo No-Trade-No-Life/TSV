@@ -106,11 +106,12 @@ export const readConfig = (text: string): ViewerConfig => {
     throw new Error('这不是 TSV v3 图表配置。');
   }
   const mappingKinds: Mapping['kind'][] = ['candlestick', 'line', 'histogram', 'markers', 'segment'];
-  if (parsed.data.some((source) => typeof source.id !== 'string' || !source.id || typeof source.filename !== 'string' || !source.filename || typeof source.timeColumn !== 'string')) {
+  if (parsed.data.some((source) => typeof source.id !== 'string' || !source.id || typeof source.filename !== 'string' || typeof source.timeColumn !== 'string')) {
     throw new Error('配置包含无效的数据源。');
   }
   if (new Set(parsed.data.map((source) => source.id)).size !== parsed.data.length) throw new Error('配置包含重复的数据源 ID。');
-  if (new Set(parsed.data.map((source) => source.filename)).size !== parsed.data.length) throw new Error('配置包含重复的文件名。');
+  const filenames = parsed.data.map((source) => source.filename).filter(Boolean);
+  if (new Set(filenames).size !== filenames.length) throw new Error('配置包含重复的文件名。');
   if (parsed.mappings.some((item) => !mappingKinds.includes(item.kind) || typeof item.sourceId !== 'string')) {
     throw new Error('配置包含不支持的图形类型。');
   }
