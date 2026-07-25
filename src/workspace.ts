@@ -68,6 +68,9 @@ export const initializeWorkspace = async (handle: WorkspaceDirectoryHandle): Pro
   }
 };
 
+export const writeWorkspaceConfig = async (handle: WorkspaceDirectoryHandle, config: WorkspaceConfig) =>
+  writeFile(await handle.getFileHandle(workspaceConfigFile, { create: true }), JSON.stringify(config, null, 2));
+
 export const listWorkspaceViewFiles = async (handle: WorkspaceDirectoryHandle) => {
   const root = await handle.getDirectoryHandle('.tsv', { create: true });
   const views = await root.getDirectoryHandle('views', { create: true });
