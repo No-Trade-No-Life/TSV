@@ -12,7 +12,15 @@ import {
 import { parseNumber, parseTime } from './data';
 import type { Dataset, Mapping, Row, ViewerConfig } from './types';
 
-type Props = { dataset: Dataset; config: ViewerConfig };
+type Props = { datasets: Dataset[]; config: ViewerConfig };
+export type ResolvedMapping = { dataset: Dataset; timeColumn: string; mapping: Mapping };
+
+export const resolveMappings = (datasets: Dataset[], config: ViewerConfig): ResolvedMapping[] =>
+  config.mappings.flatMap((mapping) => {
+    const dataset = datasets.find((source) => source.id === mapping.sourceId);
+    const source = config.sources.find((entry) => entry.id === mapping.sourceId);
+    return dataset && source?.timeColumn ? [{ dataset, timeColumn: source.timeColumn, mapping }] : [];
+  });
 
 const timeRows = (rows: Row[], column: string) =>
   rows
@@ -32,8 +40,8 @@ const uniqueTimes = <T extends { time: Time }>(points: T[]) => {
   return [...latestByTime.values()].sort((left, right) => Number(left.time) - Number(right.time));
 };
 
-const addMapping = (chart: IChartApi, dataset: Dataset, config: ViewerConfig, mapping: Mapping) => {
-  const rows = timeRows(dataset.rows, config.timeColumn);
+const addMapping = (chart: IChartApi, dataset: Dataset, timeColumn: string, mapping: Mapping) => {
+  const rows = timeRows(dataset.rows, timeColumn);
   if (mapping.kind === 'candlestick') {
     const series = chart.addSeries(CandlestickSeries, {
       upColor: '#c6dd62', downColor: '#ef7e76', borderVisible: false, wickUpColor: '#c6dd62', wickDownColor: '#ef7e76', title: mapping.name,
@@ -49,12 +57,12 @@ const addMapping = (chart: IChartApi, dataset: Dataset, config: ViewerConfig, ma
   }
   if (mapping.kind === 'histogram') {
     const series = chart.addSeries(HistogramSeries, { color: mapping.color, title: mapping.name, priceFormat: { type: 'price', precision: 4, minMove: 0.0001 } });
-    series.setData(valuePoints(dataset.rows, config.timeColumn, mapping.valueColumn));
+    series.setData(valuePoints(dataset.rows, timeColumn, mapping.valueColumn));
     return;
   }
   if (mapping.kind === 'markers') {
     const series = chart.addSeries(LineSeries, { color: 'rgba(0,0,0,0)', lineVisible: false, lastValueVisible: false, priceLineVisible: false, title: mapping.name });
-    const points = valuePoints(dataset.rows, config.timeColumn, mapping.valueColumn);
+    const points = valuePoints(dataset.rows, timeColumn, mapping.valueColumn);
     series.setData(points);
     createSeriesMarkers(series, rows.flatMap(({ row, time }) => {
       const value = parseNumber(row[mapping.valueColumn ?? '']);
@@ -83,10 +91,10 @@ const addMapping = (chart: IChartApi, dataset: Dataset, config: ViewerConfig, ma
     return;
   }
   const series = chart.addSeries(LineSeries, { color: mapping.color, lineWidth: 2, title: mapping.name });
-  series.setData(valuePoints(dataset.rows, config.timeColumn, mapping.valueColumn));
+  series.setData(valuePoints(dataset.rows, timeColumn, mapping.valueColumn));
 };
 
-export const Chart = ({ dataset, config }: Props) => {
+export const Chart = ({ datasets, config }: Props) => {
   const host = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!host.current) return undefined;
@@ -99,9 +107,9 @@ export const Chart = ({ dataset, config }: Props) => {
       timeScale: { borderColor: '#3b4237', timeVisible: true, secondsVisible: false },
       crosshair: { vertLine: { color: '#c6dd6266' }, horzLine: { color: '#c6dd6266' } },
     });
-    config.mappings.forEach((item) => addMapping(chart, dataset, config, item));
+    resolveMappings(datasets, config).forEach(({ dataset, timeColumn, mapping }) => addMapping(chart, dataset, timeColumn, mapping));
     chart.timeScale().fitContent();
     return () => chart.remove();
-  }, [dataset, config]);
+  }, [datasets, config]);
   return <div className="chart-host" ref={host} aria-label="时间序列图表" />;
 };

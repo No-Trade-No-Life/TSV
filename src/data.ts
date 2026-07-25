@@ -8,7 +8,7 @@ const id = () => crypto.randomUUID();
 const normaliseRows = (rows: Row[]) =>
   rows.filter((row) => Object.values(row).some((value) => value !== '' && value !== null && value !== undefined));
 
-export const readDataset = async (file: File): Promise<Dataset> => {
+export const readDataset = async (file: File, id = file.name): Promise<Dataset> => {
   const filename = file.name.toLowerCase();
   if (filename.endsWith('.csv')) {
     const result = Papa.parse<Row>(await file.text(), {
@@ -17,12 +17,12 @@ export const readDataset = async (file: File): Promise<Dataset> => {
     });
     if (result.errors.length > 0) throw new Error(`CSV 解析失败：${result.errors[0].message}`);
     const rows = normaliseRows(result.data);
-    return { fileName: file.name, format: 'CSV', rows, columns: Object.keys(rows[0] ?? {}) };
+    return { id, fileName: file.name, format: 'CSV', rows, columns: Object.keys(rows[0] ?? {}) };
   }
   if (filename.endsWith('.parquet') || filename.endsWith('.pq')) {
     const arrayBuffer = await file.arrayBuffer();
     const rows = normaliseRows((await parquetReadObjects({ file: arrayBuffer, compressors })) as Row[]);
-    return { fileName: file.name, format: 'Parquet', rows, columns: Object.keys(rows[0] ?? {}) };
+    return { id, fileName: file.name, format: 'Parquet', rows, columns: Object.keys(rows[0] ?? {}) };
   }
   throw new Error('只支持 .csv、.parquet 或 .pq 文件。');
 };
@@ -32,27 +32,31 @@ const firstMatchingColumn = (columns: string[], candidates: string[]) =>
 
 const colorFor = (index: number) => ['#c6dd62', '#72c7e8', '#ea9c62', '#c5a0eb', '#ed7288'][index % 5];
 
-const mapping = (kind: Mapping['kind'], name: string, index: number): Mapping => ({
+const mapping = (kind: Mapping['kind'], name: string, index: number): Omit<Mapping, 'sourceId'> => ({
   id: id(),
   kind,
   name,
   color: colorFor(index),
 });
 
-export const createInitialConfig = (columns: string[]): ViewerConfig => {
-  const timeColumn = firstMatchingColumn(columns, ['time', 'timestamp', 'date', 'datetime', 'ts']) ?? columns[0] ?? '';
-  const openColumn = firstMatchingColumn(columns, ['open', 'o']);
-  const highColumn = firstMatchingColumn(columns, ['high', 'h']);
-  const lowColumn = firstMatchingColumn(columns, ['low', 'l']);
-  const closeColumn = firstMatchingColumn(columns, ['close', 'c', 'price']);
-  const mappings: Mapping[] = [];
-  if (openColumn && highColumn && lowColumn && closeColumn) {
-    mappings.push({ ...mapping('candlestick', 'OHLC', 0), openColumn, highColumn, lowColumn, closeColumn });
-  }
-  return { version: 1, timeColumn, mappings };
+export const createInitialConfig = (datasets: Dataset[]): ViewerConfig => {
+  const sources = datasets.map((dataset) => ({
+    id: dataset.id,
+    timeColumn: firstMatchingColumn(dataset.columns, ['time', 'timestamp', 'date', 'datetime', 'ts']) ?? dataset.columns[0] ?? '',
+  }));
+  const mappings = datasets.flatMap((dataset, index) => {
+    const openColumn = firstMatchingColumn(dataset.columns, ['open', 'o']);
+    const highColumn = firstMatchingColumn(dataset.columns, ['high', 'h']);
+    const lowColumn = firstMatchingColumn(dataset.columns, ['low', 'l']);
+    const closeColumn = firstMatchingColumn(dataset.columns, ['close', 'c', 'price']);
+    return openColumn && highColumn && lowColumn && closeColumn
+      ? [{ ...mapping('candlestick', `${dataset.fileName} · OHLC`, index), sourceId: dataset.id, openColumn, highColumn, lowColumn, closeColumn }]
+      : [];
+  });
+  return { version: 2, sources, mappings };
 };
 
-export const createMapping = (kind: Mapping['kind'], index: number): Mapping => {
+export const createMapping = (kind: Mapping['kind'], index: number, sourceId: string): Mapping => {
   const labels: Record<Mapping['kind'], string> = {
     candlestick: 'OHLC',
     line: '折线',
@@ -60,7 +64,16 @@ export const createMapping = (kind: Mapping['kind'], index: number): Mapping => 
     markers: '标记',
     segment: '线段',
   };
-  return mapping(kind, labels[kind], index);
+  return { ...mapping(kind, labels[kind], index), sourceId };
+};
+
+export const sourceIdsFor = (files: File[]) => {
+  const counts = new Map<string, number>();
+  return files.map((file) => {
+    const count = counts.get(file.name) ?? 0;
+    counts.set(file.name, count + 1);
+    return count === 0 ? file.name : `${file.name} (${count + 1})`;
+  });
 };
 
 export const parseTime = (value: unknown): number | undefined => {
@@ -88,11 +101,14 @@ export const toJson = (config: ViewerConfig) => JSON.stringify(config, null, 2);
 
 export const readConfig = (text: string): ViewerConfig => {
   const parsed = JSON.parse(text) as ViewerConfig;
-  if (parsed.version !== 1 || !Array.isArray(parsed.mappings) || typeof parsed.timeColumn !== 'string') {
-    throw new Error('这不是 TSV v1 图表配置。');
+  if (parsed.version !== 2 || !Array.isArray(parsed.sources) || !Array.isArray(parsed.mappings)) {
+    throw new Error('这不是 TSV v2 图表配置。');
   }
   const mappingKinds: Mapping['kind'][] = ['candlestick', 'line', 'histogram', 'markers', 'segment'];
-  if (parsed.mappings.some((mapping) => !mappingKinds.includes(mapping.kind))) {
+  if (parsed.sources.some((source) => typeof source.id !== 'string' || typeof source.timeColumn !== 'string')) {
+    throw new Error('配置包含无效的数据源。');
+  }
+  if (parsed.mappings.some((item) => !mappingKinds.includes(item.kind) || typeof item.sourceId !== 'string')) {
     throw new Error('配置包含不支持的图形类型。');
   }
   return {
