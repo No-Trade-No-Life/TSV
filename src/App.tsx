@@ -2,6 +2,7 @@ import { useRef, useState, type ChangeEvent } from 'react';
 import { Chart } from './Chart';
 import { createInitialConfig, createMapping, readConfig, readDataset, sourceIdsFor, toJson } from './data';
 import type { DataFileConfig, Dataset, Mapping, MappingKind, ViewerConfig } from './types';
+import { indexWorkspace, type WorkspaceDirectoryHandle, type WorkspaceFile } from './workspace';
 
 const kinds: { value: MappingKind; label: string }[] = [
   { value: 'candlestick', label: 'OHLC 蜡烛图' },
@@ -46,7 +47,7 @@ const DataFileEditor = ({ source, dataset, onChange, onDelete }: { source: DataF
     </div>
     <div className="source-fields">
       <label className="field"><span>引用 ID</span><input value={source.id} onChange={(event) => onChange({ id: event.target.value })} /></label>
-      <label className="field"><span>文件名</span><input value={source.filename} placeholder="例如 price.parquet" onChange={(event) => onChange({ filename: event.target.value })} /></label>
+      <label className="field"><span>文件名 / 工作区路径</span><input value={source.filename} placeholder="例如 price.parquet" onChange={(event) => onChange({ filename: event.target.value })} /></label>
       <TimeColumnField source={source} dataset={dataset} onChange={(timeColumn) => onChange({ timeColumn })} />
     </div>
   </div>
@@ -89,13 +90,13 @@ const MappingEditor = ({ mapping, sources, datasets, onChange, onDelete }: { map
 export default function App() {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [config, setConfig] = useState<ViewerConfig>(empty);
+  const [workspace, setWorkspace] = useState<{ name: string; handle: WorkspaceDirectoryHandle; files: WorkspaceFile[] }>();
   const [previewSourceId, setPreviewSourceId] = useState<string>();
   const [error, setError] = useState<string>();
   const [isLoading, setIsLoading] = useState(false);
   const configInput = useRef<HTMLInputElement>(null);
 
-  const loadFiles = async (event: ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files ?? []);
+  const loadDataFiles = async (files: File[], fileKeys = files.map((file) => file.name)) => {
     if (files.length === 0) return;
     setError(undefined);
     setIsLoading(true);
@@ -105,13 +106,14 @@ export default function App() {
         const nextDatasets = await Promise.all(files.map((file, index) => readDataset(file, ids[index])));
         if (nextDatasets.some((dataset) => dataset.columns.length === 0)) throw new Error('至少一个文件没有可读取的列。');
         setDatasets(nextDatasets);
-        setConfig(createInitialConfig(nextDatasets));
+        const initial = createInitialConfig(nextDatasets);
+        setConfig({ ...initial, data: initial.data.map((source, index) => ({ ...source, filename: fileKeys[index] })) });
         setPreviewSourceId(nextDatasets[0].id);
       } else {
-        const sourcesByFilename = new Map(config.data.map((source) => [source.filename, source]));
-        const unknown = files.find((file) => !sourcesByFilename.has(file.name));
-        if (unknown) throw new Error(`“${unknown.name}”不在当前 JSON 的 data 文件清单中。请先新增该数据文件配置。`);
-        const nextDatasets = await Promise.all(files.map((file) => readDataset(file, sourcesByFilename.get(file.name)!.id)));
+        const sources = files.map((file, index) => config.data.find((source) => source.filename === fileKeys[index]) ?? config.data.find((source) => source.filename === file.name));
+        const unknown = sources.findIndex((source) => !source);
+        if (unknown !== -1) throw new Error(`“${fileKeys[unknown]}”不在当前 JSON 的 data 文件清单中。请先新增该数据文件配置。`);
+        const nextDatasets = await Promise.all(files.map((file, index) => readDataset(file, sources[index]!.id)));
         if (nextDatasets.some((dataset) => dataset.columns.length === 0)) throw new Error('至少一个文件没有可读取的列。');
         setDatasets((current) => [...current.filter((dataset) => !nextDatasets.some((next) => next.id === dataset.id)), ...nextDatasets]);
         setPreviewSourceId((current) => current ?? nextDatasets[0].id);
@@ -120,9 +122,44 @@ export default function App() {
       setError(cause instanceof Error ? cause.message : '无法读取这个文件。');
     } finally {
       setIsLoading(false);
-      event.target.value = '';
     }
   };
+
+  const loadFiles = async (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? []);
+    await loadDataFiles(files);
+    event.target.value = '';
+  };
+
+  const addWorkspace = async () => {
+    const picker = (window as unknown as { showDirectoryPicker?: (options: { mode: 'read' }) => Promise<WorkspaceDirectoryHandle> }).showDirectoryPicker;
+    if (!picker) {
+      setError('当前浏览器不支持 File System Access API；请使用 Chromium 系浏览器。');
+      return;
+    }
+    try {
+      const handle = await picker.call(window, { mode: 'read' });
+      setWorkspace({ name: handle.name, handle, files: await indexWorkspace(handle) });
+      setError(undefined);
+    } catch (cause) {
+      if (cause instanceof DOMException && cause.name === 'AbortError') return;
+      setError(cause instanceof Error ? cause.message : '无法读取这个工作区。');
+    }
+  };
+
+  const refreshWorkspace = async () => {
+    if (!workspace) return;
+    try {
+      if (await workspace.handle.requestPermission({ mode: 'read' }) !== 'granted') throw new Error('未获得工作区的只读权限。');
+      const files = await indexWorkspace(workspace.handle);
+      setWorkspace((current) => current ? { ...current, files } : current);
+      setError(undefined);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '无法刷新工作区索引。');
+    }
+  };
+
+  const loadWorkspaceFiles = async (files: WorkspaceFile[]) => loadDataFiles(await Promise.all(files.map((entry) => entry.handle.getFile())), files.map((entry) => entry.path));
 
   const updateMapping = (id: string, patch: Partial<Mapping>) => setConfig((current) => ({ ...current, mappings: current.mappings.map((item) => item.id === id ? { ...item, ...patch } : item) }));
 
@@ -201,9 +238,29 @@ export default function App() {
 
     <section className="workspace">
       <aside className="sidebar" aria-label="图表配置">
+        <div className="sidebar-section workspace-summary">
+          <div className="section-title"><p className="section-label">本地工作区</p>{workspace && <span>{workspace.files.length} 个表格文件</span>}</div>
+          {workspace ? <>
+            <strong title={workspace.name}>{workspace.name}</strong>
+            <p className="hint">已获只读权限。索引包含子目录中的 CSV、Parquet 与 PQ 文件。</p>
+            <div className="workspace-actions">
+              <button className="secondary-button" onClick={() => void refreshWorkspace()}>刷新索引</button>
+              <button className="secondary-button" disabled={workspace.files.length === 0} onClick={() => void loadWorkspaceFiles(workspace.files)}>载入全部</button>
+            </div>
+            <details className="workspace-index">
+              <summary>环境索引 · {workspace.files.length} 个文件</summary>
+              <div className="workspace-file-list">
+                {workspace.files.map((file) => <div className="workspace-file" key={file.path}><code title={file.path}>{file.path}</code><button className="add-button" onClick={() => void loadWorkspaceFiles([file])}>绑定</button></div>)}
+              </div>
+            </details>
+          </> : <>
+            <p className="muted">选择一个本地目录后，TSV 只会索引并按需读取其中的表格文件。</p>
+            <button className="secondary-button add-workspace" onClick={() => void addWorkspace()}>添加工作区</button>
+          </>}
+        </div>
         <div className="sidebar-section data-summary">
           <div className="section-title"><p className="section-label">数据文件</p><span>{config.data.length}</span></div>
-          <p className="hint source-hint">这里直接编辑 JSON 的 data 数组。文件只在你主动选择后按文件名绑定，不会保存路径或内容。</p>
+          <p className="hint source-hint">这里直接编辑 JSON 的 data 数组。文件只在你主动选择后按文件名或工作区相对路径绑定，不会保存绝对路径或内容。</p>
           <div className="source-list">{config.data.map((source) => <DataFileEditor key={source.id} source={source} dataset={datasets.find((dataset) => dataset.id === source.id)} onChange={(patch) => updateDataFile(source.id, patch)} onDelete={() => removeDataFile(source.id)} />)}</div>
           {config.data.length === 0 && <p className="muted">新增数据文件，或直接载入文件自动生成清单。</p>}
           <button className="add-button add-data-file" onClick={addDataFile}>+ 新增数据文件</button>
