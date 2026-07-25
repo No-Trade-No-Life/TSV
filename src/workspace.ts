@@ -8,6 +8,7 @@ export type WorkspaceDirectoryHandle = {
   kind: 'directory';
   name: string;
   entries: () => AsyncIterableIterator<[string, WorkspaceHandle]>;
+  queryPermission: (descriptor: { mode: 'read' }) => Promise<PermissionState>;
   requestPermission: (descriptor: { mode: 'read' }) => Promise<PermissionState>;
 };
 
@@ -30,6 +31,10 @@ export const fuzzyPathMatch = (path: string, query: string) => {
   }
   return true;
 };
+
+export const workspaceHash = (workspaceId: string) => `#workspace=${encodeURIComponent(workspaceId)}`;
+
+export const workspaceIdFromHash = (hash: string) => new URLSearchParams(hash.replace(/^#/, '')).get('workspace') ?? undefined;
 
 export const indexWorkspace = async (directory: WorkspaceDirectoryHandle, prefix = ''): Promise<WorkspaceFile[]> => {
   const files: WorkspaceFile[] = [];
