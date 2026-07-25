@@ -98,18 +98,28 @@ export const Chart = ({ datasets, config }: Props) => {
   const host = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!host.current) return undefined;
-    const chart = createChart(host.current, {
-      autoSize: true,
-      height: 560,
+    const container = host.current;
+    const chart = createChart(container, {
+      width: Math.max(container.clientWidth, 1),
+      height: Math.max(container.clientHeight, 1),
       layout: { background: { type: ColorType.Solid, color: '#11140f' }, textColor: '#d9dfd2', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' },
       grid: { vertLines: { color: '#242a21' }, horzLines: { color: '#242a21' } },
       rightPriceScale: { borderColor: '#3b4237' },
       timeScale: { borderColor: '#3b4237', timeVisible: true, secondsVisible: false },
       crosshair: { vertLine: { color: '#c6dd6266' }, horzLine: { color: '#c6dd6266' } },
     });
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry && entry.contentRect.width > 0 && entry.contentRect.height > 0) {
+        chart.resize(entry.contentRect.width, entry.contentRect.height);
+      }
+    });
+    observer.observe(container);
     resolveMappings(datasets, config).forEach(({ dataset, timeColumn, mapping }) => addMapping(chart, dataset, timeColumn, mapping));
     chart.timeScale().fitContent();
-    return () => chart.remove();
+    return () => {
+      observer.disconnect();
+      chart.remove();
+    };
   }, [datasets, config]);
   return <div className="chart-host" ref={host} aria-label="时间序列图表" />;
 };
