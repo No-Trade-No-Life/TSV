@@ -99,6 +99,10 @@ export const Chart = ({ datasets, config }: Props) => {
   useEffect(() => {
     if (!host.current) return undefined;
     const container = host.current;
+    const resize = () => {
+      const { width, height } = container.getBoundingClientRect();
+      if (width > 0 && height > 0) chart.resize(width, height, true);
+    };
     const chart = createChart(container, {
       width: Math.max(container.clientWidth, 1),
       height: Math.max(container.clientHeight, 1),
@@ -108,16 +112,18 @@ export const Chart = ({ datasets, config }: Props) => {
       timeScale: { borderColor: '#3b4237', timeVisible: true, secondsVisible: false },
       crosshair: { vertLine: { color: '#c6dd6266' }, horzLine: { color: '#c6dd6266' } },
     });
-    const observer = new ResizeObserver(([entry]) => {
-      if (entry && entry.contentRect.width > 0 && entry.contentRect.height > 0) {
-        chart.resize(entry.contentRect.width, entry.contentRect.height);
-      }
-    });
+    const observer = new ResizeObserver(resize);
     observer.observe(container);
+    resize();
+    let frame = requestAnimationFrame(() => {
+      resize();
+      frame = requestAnimationFrame(resize);
+    });
     resolveMappings(datasets, config).forEach(({ dataset, timeColumn, mapping }) => addMapping(chart, dataset, timeColumn, mapping));
     chart.timeScale().fitContent();
     return () => {
       observer.disconnect();
+      cancelAnimationFrame(frame);
       chart.remove();
     };
   }, [datasets, config]);
