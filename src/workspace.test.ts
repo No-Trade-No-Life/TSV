@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fuzzyPathMatch, indexWorkspace, isTableFile, type WorkspaceDirectoryHandle, type WorkspaceFileHandle, type WorkspaceHandle } from './workspace';
+import { fuzzyPathMatch, indexWorkspace, isTableFile, workspaceHash, workspaceIdFromHash, type WorkspaceDirectoryHandle, type WorkspaceFileHandle, type WorkspaceHandle } from './workspace';
 
 const file = (name: string) => ({ kind: 'file', name }) as unknown as WorkspaceFileHandle;
 const directory = (name: string, entries: Array<[string, WorkspaceHandle]>) => ({
@@ -32,5 +32,12 @@ describe('工作区索引', () => {
   it('按顺序模糊匹配工作区相对路径', () => {
     expect(fuzzyPathMatch('futures/IC8888/minute.parquet', 'ic min')).toBe(true);
     expect(fuzzyPathMatch('futures/IC8888/minute.parquet', 'ic tick')).toBe(false);
+  });
+
+  it('在 URL Hash 中编码并读取工作区 ID', () => {
+    const id = 'f32d7ef5-8bc1-4cd4-9f48-a2de9a4dcad2';
+    expect(workspaceHash(id)).toBe(`#workspace=${id}`);
+    expect(workspaceIdFromHash(`#workspace=${id}`)).toBe(id);
+    expect(workspaceIdFromHash('#other=value')).toBeUndefined();
   });
 });

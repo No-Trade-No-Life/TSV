@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState, type ChangeEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { Chart } from './Chart';
 import { createMapping, readConfig, readDataset, toJson } from './data';
 import type { DataFileConfig, Dataset, Mapping, MappingKind, ViewerConfig } from './types';
-import { fuzzyPathMatch, indexWorkspace, type WorkspaceDirectoryHandle, type WorkspaceFile } from './workspace';
+import { fuzzyPathMatch, indexWorkspace, workspaceHash, workspaceIdFromHash, type WorkspaceDirectoryHandle, type WorkspaceFile } from './workspace';
+import { getWorkspace, listWorkspaces, saveWorkspace, type StoredWorkspace } from './workspace-store';
 
 const kinds: { value: MappingKind; label: string }[] = [
   { value: 'candlestick', label: 'OHLC 蜡烛图' },
@@ -13,6 +14,8 @@ const kinds: { value: MappingKind; label: string }[] = [
 ];
 
 const empty: ViewerConfig = { version: 3, data: [], mappings: [] };
+
+type ActiveWorkspace = StoredWorkspace & { files: WorkspaceFile[]; permission: PermissionState };
 
 const download = (name: string, content: string) => {
   const anchor = document.createElement('a');
@@ -116,17 +119,67 @@ const MappingEditor = ({ mapping, sources, datasets, onChange, onDelete }: { map
 export default function App() {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [config, setConfig] = useState<ViewerConfig>(empty);
-  const [workspace, setWorkspace] = useState<{ name: string; handle: WorkspaceDirectoryHandle; files: WorkspaceFile[] }>();
+  const [workspace, setWorkspace] = useState<ActiveWorkspace>();
+  const [workspaceList, setWorkspaceList] = useState<StoredWorkspace[]>([]);
   const [previewSourceId, setPreviewSourceId] = useState<string>();
   const [error, setError] = useState<string>();
   const [isLoading, setIsLoading] = useState(false);
   const configInput = useRef<HTMLInputElement>(null);
   const datasetCache = useRef(new Map<string, Dataset>());
 
+  const activateWorkspace = useCallback(async (record: StoredWorkspace, requestPermission: boolean) => {
+    const permission = requestPermission
+      ? await record.handle.requestPermission({ mode: 'read' })
+      : await record.handle.queryPermission({ mode: 'read' });
+    datasetCache.current.clear();
+    if (permission !== 'granted') {
+      setWorkspace({ ...record, files: [], permission });
+      setDatasets([]);
+      return;
+    }
+    setWorkspace({ ...record, files: await indexWorkspace(record.handle), permission });
+  }, []);
+
+  const openWorkspace = useCallback(async (workspaceId: string, requestPermission: boolean) => {
+    try {
+      const record = await getWorkspace(workspaceId);
+      if (!record) throw new Error(`未找到工作区 ${workspaceId}。`);
+      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${workspaceHash(record.workspace_id)}`);
+      await activateWorkspace(record, requestPermission);
+      setError(undefined);
+    } catch (cause) {
+      setWorkspace(undefined);
+      setDatasets([]);
+      setError(cause instanceof Error ? cause.message : '无法打开这个工作区。');
+    }
+  }, [activateWorkspace]);
+
   useEffect(() => {
     let active = true;
-    if (!workspace) {
+    listWorkspaces().then((records) => {
+      if (!active) return;
+      setWorkspaceList(records);
+      const workspaceId = workspaceIdFromHash(window.location.hash);
+      if (workspaceId) void openWorkspace(workspaceId, false);
+    }).catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : '无法读取已保存的工作区。'); });
+    return () => { active = false; };
+  }, [openWorkspace]);
+
+  useEffect(() => {
+    const onHashChange = () => {
+      const workspaceId = workspaceIdFromHash(window.location.hash);
+      if (workspaceId) void openWorkspace(workspaceId, false);
+      if (!workspaceId) setWorkspace(undefined);
+    };
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, [openWorkspace]);
+
+  useEffect(() => {
+    let active = true;
+    if (!workspace || workspace.permission !== 'granted') {
       setDatasets([]);
+      setIsLoading(false);
       return () => { active = false; };
     }
     const selected = config.data.flatMap((source) => {
@@ -164,8 +217,11 @@ export default function App() {
     }
     try {
       const handle = await picker.call(window, { mode: 'read' });
-      datasetCache.current.clear();
-      setWorkspace({ name: handle.name, handle, files: await indexWorkspace(handle) });
+      const record: StoredWorkspace = { workspace_id: crypto.randomUUID(), name: handle.name, handle, createdAt: Date.now() };
+      await saveWorkspace(record);
+      setWorkspaceList((current) => [...current, record].sort((left, right) => left.createdAt - right.createdAt));
+      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${workspaceHash(record.workspace_id)}`);
+      await activateWorkspace(record, true);
       setError(undefined);
     } catch (cause) {
       if (cause instanceof DOMException && cause.name === 'AbortError') return;
@@ -176,10 +232,7 @@ export default function App() {
   const refreshWorkspace = async () => {
     if (!workspace) return;
     try {
-      if (await workspace.handle.requestPermission({ mode: 'read' }) !== 'granted') throw new Error('未获得工作区的只读权限。');
-      const files = await indexWorkspace(workspace.handle);
-      datasetCache.current.clear();
-      setWorkspace((current) => current ? { ...current, files } : current);
+      await activateWorkspace(workspace, true);
       setError(undefined);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '无法刷新工作区索引。');
@@ -241,19 +294,26 @@ export default function App() {
 
     <section className="workspace">
       <aside className="sidebar" aria-label="图表配置">
+        <div className="sidebar-section handle-list">
+          <div className="section-title"><p className="section-label">已保存工作区</p><span>{workspaceList.length}</span></div>
+          {workspaceList.length > 0 ? <div className="handle-items">{workspaceList.map((item) => <button className={workspace?.workspace_id === item.workspace_id ? 'handle-item active' : 'handle-item'} key={item.workspace_id} onClick={() => void openWorkspace(item.workspace_id, true)}><span>{item.name}</span><code>{item.workspace_id}</code></button>)}</div> : <p className="muted">尚未保存工作区</p>}
+        </div>
         <div className="sidebar-section workspace-summary">
           <div className="section-title"><p className="section-label">本地工作区</p>{workspace && <span>{workspace.files.length} 个表格文件</span>}</div>
           {workspace ? <>
             <strong title={workspace.name}>{workspace.name}</strong>
-            <p className="hint">已获只读权限。数据文件选择后会自动读取并缓存；索引包含子目录中的 CSV、Parquet 与 PQ 文件。</p>
-            <button className="secondary-button add-workspace" onClick={() => void refreshWorkspace()}>刷新索引</button>
-            <details className="workspace-index"><summary>环境索引 · {workspace.files.length} 个文件</summary><div className="workspace-file-list">{workspace.files.map((file) => <code key={file.path} title={file.path}>{file.path}</code>)}</div></details>
+            <code className="workspace-id">{workspaceHash(workspace.workspace_id)}</code>
+            {workspace.permission === 'granted' ? <>
+              <p className="hint">已获只读权限。数据文件选择后会自动读取并缓存；索引包含子目录中的 CSV、Parquet 与 PQ 文件。</p>
+              <button className="secondary-button add-workspace" onClick={() => void refreshWorkspace()}>刷新索引</button>
+              <details className="workspace-index"><summary>环境索引 · {workspace.files.length} 个文件</summary><div className="workspace-file-list">{workspace.files.map((file) => <code key={file.path} title={file.path}>{file.path}</code>)}</div></details>
+            </> : <><p className="hint">该目录句柄已恢复，但浏览器需要重新授予只读访问权限。</p><button className="secondary-button add-workspace" onClick={() => void refreshWorkspace()}>重新授权并打开</button></>}
           </> : <p className="muted">添加工作区后，从数据文件的路径选择器中搜索并选择文件。</p>}
         </div>
         <div className="sidebar-section data-summary">
           <div className="section-title"><p className="section-label">数据文件</p><span>{config.data.length}</span></div>
           <p className="hint source-hint">这里直接编辑 JSON 的 data 数组。选择工作区相对路径后，应用自动解析数据，不需要绑定动作。</p>
-          <div className="source-list">{config.data.map((source) => <DataFileEditor key={source.id} source={source} dataset={datasets.find((dataset) => dataset.id === source.id)} files={workspace?.files ?? []} workspaceReady={Boolean(workspace)} onChange={(patch) => updateDataFile(source.id, patch)} onDelete={() => removeDataFile(source.id)} />)}</div>
+          <div className="source-list">{config.data.map((source) => <DataFileEditor key={source.id} source={source} dataset={datasets.find((dataset) => dataset.id === source.id)} files={workspace?.files ?? []} workspaceReady={workspace?.permission === 'granted'} onChange={(patch) => updateDataFile(source.id, patch)} onDelete={() => removeDataFile(source.id)} />)}</div>
           {config.data.length === 0 && <p className="muted">新增数据文件后，从工作区路径选择器中选择文件。</p>}
           <button className="add-button add-data-file" onClick={addDataFile}>+ 新增数据文件</button>
         </div>
@@ -275,7 +335,7 @@ export default function App() {
           <div className="chart-caption"><div><p className="section-label">复盘图表</p><h1>{datasets.length} 个自动加载的数据文件 · {config.mappings.length} 个图层</h1></div><span>拖动缩放 · 十字线检查</span></div>
           <Chart datasets={datasets} config={config} />
           {previewDataset && <Preview dataset={previewDataset} datasets={datasets} selectedId={previewDataset.id} onSelect={setPreviewSourceId} />}
-        </div> : <EmptyState hasWorkspace={Boolean(workspace)} hasData={config.data.length > 0} onAddWorkspace={addWorkspace} />}
+        </div> : <EmptyState hasWorkspace={workspace?.permission === 'granted'} hasData={config.data.length > 0} onAddWorkspace={addWorkspace} />}
       </section>
     </section>
   </main>;
