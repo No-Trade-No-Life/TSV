@@ -18,7 +18,7 @@ export type ResolvedMapping = { dataset: Dataset; timeColumn: string; mapping: M
 export const resolveMappings = (datasets: Dataset[], config: ViewerConfig): ResolvedMapping[] =>
   config.mappings.flatMap((mapping) => {
     const dataset = datasets.find((source) => source.id === mapping.sourceId);
-    const source = config.sources.find((entry) => entry.id === mapping.sourceId);
+    const source = config.data.find((entry) => entry.id === mapping.sourceId);
     return dataset && source?.timeColumn ? [{ dataset, timeColumn: source.timeColumn, mapping }] : [];
   });
 

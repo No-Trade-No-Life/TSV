@@ -40,8 +40,9 @@ const mapping = (kind: Mapping['kind'], name: string, index: number): Omit<Mappi
 });
 
 export const createInitialConfig = (datasets: Dataset[]): ViewerConfig => {
-  const sources = datasets.map((dataset) => ({
+  const data = datasets.map((dataset) => ({
     id: dataset.id,
+    filename: dataset.fileName,
     timeColumn: firstMatchingColumn(dataset.columns, ['time', 'timestamp', 'date', 'datetime', 'ts']) ?? dataset.columns[0] ?? '',
   }));
   const mappings = datasets.flatMap((dataset, index) => {
@@ -53,7 +54,7 @@ export const createInitialConfig = (datasets: Dataset[]): ViewerConfig => {
       ? [{ ...mapping('candlestick', `${dataset.fileName} · OHLC`, index), sourceId: dataset.id, openColumn, highColumn, lowColumn, closeColumn }]
       : [];
   });
-  return { version: 2, sources, mappings };
+  return { version: 3, data, mappings };
 };
 
 export const createMapping = (kind: Mapping['kind'], index: number, sourceId: string): Mapping => {
@@ -101,16 +102,19 @@ export const toJson = (config: ViewerConfig) => JSON.stringify(config, null, 2);
 
 export const readConfig = (text: string): ViewerConfig => {
   const parsed = JSON.parse(text) as ViewerConfig;
-  if (parsed.version !== 2 || !Array.isArray(parsed.sources) || !Array.isArray(parsed.mappings)) {
-    throw new Error('这不是 TSV v2 图表配置。');
+  if (parsed.version !== 3 || !Array.isArray(parsed.data) || !Array.isArray(parsed.mappings)) {
+    throw new Error('这不是 TSV v3 图表配置。');
   }
   const mappingKinds: Mapping['kind'][] = ['candlestick', 'line', 'histogram', 'markers', 'segment'];
-  if (parsed.sources.some((source) => typeof source.id !== 'string' || typeof source.timeColumn !== 'string')) {
+  if (parsed.data.some((source) => typeof source.id !== 'string' || !source.id || typeof source.filename !== 'string' || !source.filename || typeof source.timeColumn !== 'string')) {
     throw new Error('配置包含无效的数据源。');
   }
+  if (new Set(parsed.data.map((source) => source.id)).size !== parsed.data.length) throw new Error('配置包含重复的数据源 ID。');
+  if (new Set(parsed.data.map((source) => source.filename)).size !== parsed.data.length) throw new Error('配置包含重复的文件名。');
   if (parsed.mappings.some((item) => !mappingKinds.includes(item.kind) || typeof item.sourceId !== 'string')) {
     throw new Error('配置包含不支持的图形类型。');
   }
+  if (parsed.mappings.some((item) => !parsed.data.some((source) => source.id === item.sourceId))) throw new Error('图层引用了不存在的数据源。');
   return {
     ...parsed,
     mappings: parsed.mappings.map((item, index) => ({
