@@ -5,6 +5,7 @@ export type MappingKind = 'candlestick' | 'line' | 'histogram' | 'markers' | 'se
 export type Mapping = {
   id: string;
   sourceId: string;
+  paneId: string;
   kind: MappingKind;
   name: string;
   color: string;
@@ -20,13 +21,26 @@ export type Mapping = {
 
 export type DataFileConfig = {
   id: string;
+  workspaceId: string;
   filename: string;
   timeColumn: string;
 };
 
+export type PaneConfig = {
+  id: string;
+  name: string;
+};
+
+export type ViewConfig = {
+  id: string;
+  name: string;
+  panes: PaneConfig[];
+};
+
 export type ViewerConfig = {
-  version: 3;
+  version: 4;
   data: DataFileConfig[];
+  view: ViewConfig;
   mappings: Mapping[];
 };
 

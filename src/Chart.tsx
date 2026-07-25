@@ -13,13 +13,14 @@ import { parseNumber, parseTime } from './data';
 import type { Dataset, Mapping, Row, ViewerConfig } from './types';
 
 type Props = { datasets: Dataset[]; config: ViewerConfig };
-export type ResolvedMapping = { dataset: Dataset; timeColumn: string; mapping: Mapping };
+export type ResolvedMapping = { dataset: Dataset; timeColumn: string; paneIndex: number; mapping: Mapping };
 
 export const resolveMappings = (datasets: Dataset[], config: ViewerConfig): ResolvedMapping[] =>
   config.mappings.flatMap((mapping) => {
     const dataset = datasets.find((source) => source.id === mapping.sourceId);
     const source = config.data.find((entry) => entry.id === mapping.sourceId);
-    return dataset && source?.timeColumn ? [{ dataset, timeColumn: source.timeColumn, mapping }] : [];
+    const paneIndex = config.view.panes.findIndex((pane) => pane.id === mapping.paneId);
+    return dataset && source?.timeColumn && paneIndex !== -1 ? [{ dataset, timeColumn: source.timeColumn, paneIndex, mapping }] : [];
   });
 
 const timeRows = (rows: Row[], column: string) =>
@@ -40,12 +41,12 @@ const uniqueTimes = <T extends { time: Time }>(points: T[]) => {
   return [...latestByTime.values()].sort((left, right) => Number(left.time) - Number(right.time));
 };
 
-const addMapping = (chart: IChartApi, dataset: Dataset, timeColumn: string, mapping: Mapping) => {
+const addMapping = (chart: IChartApi, dataset: Dataset, timeColumn: string, paneIndex: number, mapping: Mapping) => {
   const rows = timeRows(dataset.rows, timeColumn);
   if (mapping.kind === 'candlestick') {
     const series = chart.addSeries(CandlestickSeries, {
       upColor: '#c6dd62', downColor: '#ef7e76', borderVisible: false, wickUpColor: '#c6dd62', wickDownColor: '#ef7e76', title: mapping.name,
-    });
+    }, paneIndex);
     series.setData(uniqueTimes(rows.flatMap(({ row, time }) => {
       const open = parseNumber(row[mapping.openColumn ?? '']);
       const high = parseNumber(row[mapping.highColumn ?? '']);
@@ -56,12 +57,12 @@ const addMapping = (chart: IChartApi, dataset: Dataset, timeColumn: string, mapp
     return;
   }
   if (mapping.kind === 'histogram') {
-    const series = chart.addSeries(HistogramSeries, { color: mapping.color, title: mapping.name, priceFormat: { type: 'price', precision: 4, minMove: 0.0001 } });
+    const series = chart.addSeries(HistogramSeries, { color: mapping.color, title: mapping.name, priceFormat: { type: 'price', precision: 4, minMove: 0.0001 } }, paneIndex);
     series.setData(valuePoints(dataset.rows, timeColumn, mapping.valueColumn));
     return;
   }
   if (mapping.kind === 'markers') {
-    const series = chart.addSeries(LineSeries, { color: 'rgba(0,0,0,0)', lineVisible: false, lastValueVisible: false, priceLineVisible: false, title: mapping.name });
+    const series = chart.addSeries(LineSeries, { color: 'rgba(0,0,0,0)', lineVisible: false, lastValueVisible: false, priceLineVisible: false, title: mapping.name }, paneIndex);
     const points = valuePoints(dataset.rows, timeColumn, mapping.valueColumn);
     series.setData(points);
     createSeriesMarkers(series, rows.flatMap(({ row, time }) => {
@@ -82,7 +83,7 @@ const addMapping = (chart: IChartApi, dataset: Dataset, timeColumn: string, mapp
         lastValueVisible: false,
         priceLineVisible: false,
         title: index === 0 ? mapping.name : '',
-      });
+      }, paneIndex);
       series.setData([
         { time: Math.min(time, endTime) as Time, value: time < endTime ? startValue : endValue },
         { time: Math.max(time, endTime) as Time, value: time < endTime ? endValue : startValue },
@@ -90,7 +91,7 @@ const addMapping = (chart: IChartApi, dataset: Dataset, timeColumn: string, mapp
     });
     return;
   }
-  const series = chart.addSeries(LineSeries, { color: mapping.color, lineWidth: 2, title: mapping.name });
+  const series = chart.addSeries(LineSeries, { color: mapping.color, lineWidth: 2, title: mapping.name }, paneIndex);
   series.setData(valuePoints(dataset.rows, timeColumn, mapping.valueColumn));
 };
 
@@ -119,7 +120,8 @@ export const Chart = ({ datasets, config }: Props) => {
       resize();
       frame = requestAnimationFrame(resize);
     });
-    resolveMappings(datasets, config).forEach(({ dataset, timeColumn, mapping }) => addMapping(chart, dataset, timeColumn, mapping));
+    config.view.panes.slice(1).forEach(() => chart.addPane(true));
+    resolveMappings(datasets, config).forEach(({ dataset, timeColumn, paneIndex, mapping }) => addMapping(chart, dataset, timeColumn, paneIndex, mapping));
     chart.timeScale().fitContent();
     return () => {
       observer.disconnect();
