@@ -11,17 +11,19 @@ npm run dev
 
 ## 数据与图表配置
 
-左侧的“数据文件”直接管理 JSON 的 `data` 数组：每项都有稳定的 `id`、所属 `workspaceId`、工作区相对路径 `filename`，以及自己的 `timeColumn`。图层通过 `sourceId` 引用这些条目；选择路径后应用会自动读取和缓存数据，再显示列选择器。删除数据文件会一并删除其图层和内存缓存。
+左侧修改的是当前 View 的草稿：数据文件、Pane 与图层的更改不会立即刷新图表。点击“保存并应用”后，草稿会写入工作区的 View 文件，再作为图表的已应用版本。数据文件包含稳定的 `id`、所属 `workspaceId`、工作区相对路径 `filename` 与自己的 `timeColumn`；图层通过 `sourceId` 引用它们。
 
-“搜索文件”弹窗会跨所有已授权工作区模糊搜索 CSV、Parquet 与 PQ 文件；可先展开预览前 12 行，再将文件加入数据源或替换已有数据源。JSON 可以先导入，再选择工作区；空路径也可用于导出尚未完成的数据文件模板。JSON 永远不保存绝对路径、文件内容或浏览器目录句柄。
+“搜索文件”弹窗会跨所有已授权工作区模糊搜索 CSV、Parquet 与 PQ 文件；可先展开预览前 12 行，再将文件加入数据源或替换已有数据源。View 不再通过导入/导出 JSON 管理：应用只扫描、还原和保存工作区中的 View 文件。View JSON 永远不保存绝对路径、文件内容或浏览器目录句柄。
 
 一个 View 包含多个 Pane：主图和任意数量的副图都可以拥有多个图层。每个图层通过 `paneId` 放入目标 Pane。
 
 ### 本地工作区
 
-在 Chromium 系浏览器中，可通过“添加工作区”选择多个本地目录。TSV 使用 `FileSystemDirectoryHandle` 的 `read` 模式，仅递归建立 CSV、Parquet 和 PQ 文件的相对路径索引；不会申请写权限。每个目录句柄会连同 UUID `workspace_id` 持久化到浏览器 IndexedDB，所有已授权工作区会共同提供搜索与数据视图。浏览器撤销既有授权时，可在工作区列表中重新授权；URL 不携带工作区参数。
+在 Chromium 系浏览器中，可通过“添加工作区”选择多个本地目录。TSV 使用 `FileSystemDirectoryHandle` 的 `readwrite` 模式：首次添加时，会在工作区根目录创建 `tsv.config.json`，至少包含 `{ "workspace_id": "UUID" }`，并可保存 `display_name` 等工作区元数据。这个文件随工作区同步，因此不同机器会识别为同一个工作区。浏览器 IndexedDB 只保存目录 Handle 列表，不保存工作区 UUID、名称或 View 元数据。
 
-导出的 JSON 是图表元数据。它只保存工作区相对路径，不保存文件内容、绝对路径或浏览器目录句柄，因此不会扩大浏览器对本机文件的访问范围。核心结构如下：
+View 文件位于工作区 `.tsv/views/<view_id>.json`。应用扫描所有已授权工作区的该目录以还原 View；每个 View 的 `view.id` 是 UUID，`view.name` 是显示名称。保存时会直接覆盖对应的 View 文件。
+
+View 文件是图表元数据。它只保存工作区相对路径，不保存文件内容、绝对路径或浏览器目录句柄，因此不会扩大浏览器对本机文件的访问范围。核心结构如下：
 
 ```json
 {
@@ -40,7 +42,7 @@ npm run dev
 }
 ```
 
-`data[].id` 是图层的稳定引用，`workspaceId + filename` 唯一定位一个工作区文件，`mappings[].sourceId` 决定图层读哪个文件，`mappings[].paneId` 决定它位于哪个 Pane；每一个源使用自己的 `timeColumn`。线段将该源一行中的时间列与 `endTimeColumn` 相连，并使用 `valueColumn` 与 `endValueColumn` 作为两端数值。导入 v3 配置时会自动迁移到 v4 的主图 Pane；未知图形类型、重复 ID/文件、无效 Pane 或不存在的数据源引用会被拒绝。
+`data[].id` 是图层的稳定引用，`workspaceId + filename` 唯一定位一个工作区文件，`mappings[].sourceId` 决定图层读哪个文件，`mappings[].paneId` 决定它位于哪个 Pane；每一个源使用自己的 `timeColumn`。线段将该源一行中的时间列与 `endTimeColumn` 相连，并使用 `valueColumn` 与 `endValueColumn` 作为两端数值。未知图形类型、重复 ID/文件、无效 Pane 或不存在的数据源引用会被拒绝。
 
 ## 部署
 
