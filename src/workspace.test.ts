@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { indexWorkspace, isTableFile, type WorkspaceDirectoryHandle, type WorkspaceFileHandle, type WorkspaceHandle } from './workspace';
+import { fuzzyPathMatch, indexWorkspace, isTableFile, type WorkspaceDirectoryHandle, type WorkspaceFileHandle, type WorkspaceHandle } from './workspace';
 
 const file = (name: string) => ({ kind: 'file', name }) as unknown as WorkspaceFileHandle;
 const directory = (name: string, entries: Array<[string, WorkspaceHandle]>) => ({
@@ -27,5 +27,10 @@ describe('工作区索引', () => {
     expect(isTableFile('ticks.CSV')).toBe(true);
     expect(isTableFile('prices.PARQUET')).toBe(true);
     expect(isTableFile('readme.txt')).toBe(false);
+  });
+
+  it('按顺序模糊匹配工作区相对路径', () => {
+    expect(fuzzyPathMatch('futures/IC8888/minute.parquet', 'ic min')).toBe(true);
+    expect(fuzzyPathMatch('futures/IC8888/minute.parquet', 'ic tick')).toBe(false);
   });
 });

@@ -1,8 +1,8 @@
-import { useRef, useState, type ChangeEvent } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { Chart } from './Chart';
-import { createInitialConfig, createMapping, readConfig, readDataset, sourceIdsFor, toJson } from './data';
+import { createMapping, readConfig, readDataset, toJson } from './data';
 import type { DataFileConfig, Dataset, Mapping, MappingKind, ViewerConfig } from './types';
-import { indexWorkspace, type WorkspaceDirectoryHandle, type WorkspaceFile } from './workspace';
+import { fuzzyPathMatch, indexWorkspace, type WorkspaceDirectoryHandle, type WorkspaceFile } from './workspace';
 
 const kinds: { value: MappingKind; label: string }[] = [
   { value: 'candlestick', label: 'OHLC 蜡烛图' },
@@ -36,31 +36,57 @@ const ColumnField = ({ label, value, columns, onChange }: FieldProps) => (
 const TimeColumnField = ({ source, dataset, onChange }: { source: DataFileConfig; dataset?: Dataset; onChange: (timeColumn: string) => void }) => (
   dataset
     ? <ColumnField label="时间列" value={source.timeColumn} columns={dataset.columns} onChange={onChange} />
-    : <label className="field"><span>时间列</span><input value={source.timeColumn} placeholder="例如 timestamp" onChange={(event) => onChange(event.target.value)} /></label>
+    : <label className="field"><span>时间列</span><input value={source.timeColumn} placeholder="载入后选择列" onChange={(event) => onChange(event.target.value)} /></label>
 );
 
-const DataFileEditor = ({ source, dataset, onChange, onDelete }: { source: DataFileConfig; dataset?: Dataset; onChange: (patch: Partial<DataFileConfig>) => void; onDelete: () => void }) => (
-  <div className="source-summary">
-    <div className="source-head"><strong title={source.filename}>{source.filename || '未命名文件'}</strong><button className="icon-button danger" onClick={onDelete} aria-label={`移除 ${source.filename || source.id}`}>×</button></div>
-    <div className="metadata">
-      {dataset ? <><span>{dataset.format}</span><span>{dataset.rows.length.toLocaleString()} 行</span><span>{dataset.columns.length} 列</span></> : <span className="pending">待绑定本地文件</span>}
+const PathPicker = ({ value, files, disabled, onChange }: { value: string; files: WorkspaceFile[]; disabled: boolean; onChange: (value: string) => void }) => {
+  const [query, setQuery] = useState(value);
+  const [open, setOpen] = useState(false);
+  useEffect(() => setQuery(value), [value]);
+  const matches = files.filter((file) => fuzzyPathMatch(file.path, query)).slice(0, 50);
+  return <label className="field path-field">
+    <span>工作区文件</span>
+    <div className="path-picker">
+      <input
+        aria-autocomplete="list"
+        aria-expanded={open}
+        aria-label="搜索工作区文件"
+        disabled={disabled}
+        placeholder={disabled ? '先添加工作区' : '输入路径搜索'}
+        role="combobox"
+        value={query}
+        onBlur={() => { setOpen(false); setQuery(value); }}
+        onChange={(event) => { setQuery(event.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+      />
+      {open && !disabled && <div className="path-results" role="listbox">
+        {matches.map((file) => <button key={file.path} role="option" type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => { onChange(file.path); setQuery(file.path); setOpen(false); }}>{file.path}</button>)}
+        {matches.length === 0 && <p>没有匹配的表格文件</p>}
+      </div>}
     </div>
+  </label>;
+};
+
+const DataFileEditor = ({ source, dataset, files, workspaceReady, onChange, onDelete }: { source: DataFileConfig; dataset?: Dataset; files: WorkspaceFile[]; workspaceReady: boolean; onChange: (patch: Partial<DataFileConfig>) => void; onDelete: () => void }) => {
+  const indexed = files.some((file) => file.path === source.filename);
+  const status = dataset ? `${dataset.format} · ${dataset.rows.length.toLocaleString()} 行 · ${dataset.columns.length} 列` : !workspaceReady ? '等待工作区' : !source.filename ? '选择工作区文件' : indexed ? '正在自动读取' : '路径未在工作区中找到';
+  return <div className="source-summary">
+    <div className="source-head"><strong title={source.filename}>{source.filename || '未选择文件'}</strong><button className="icon-button danger" onClick={onDelete} aria-label={`移除 ${source.filename || source.id}`}>×</button></div>
+    <div className="metadata"><span className={dataset ? '' : 'pending'}>{status}</span></div>
     <div className="source-fields">
       <label className="field"><span>引用 ID</span><input value={source.id} onChange={(event) => onChange({ id: event.target.value })} /></label>
-      <label className="field"><span>文件名 / 工作区路径</span><input value={source.filename} placeholder="例如 price.parquet" onChange={(event) => onChange({ filename: event.target.value })} /></label>
+      <PathPicker value={source.filename} files={files} disabled={!workspaceReady} onChange={(filename) => onChange({ filename })} />
       <TimeColumnField source={source} dataset={dataset} onChange={(timeColumn) => onChange({ timeColumn })} />
     </div>
-  </div>
-);
+  </div>;
+};
 
 const MappingEditor = ({ mapping, sources, datasets, onChange, onDelete }: { mapping: Mapping; sources: DataFileConfig[]; datasets: Dataset[]; onChange: (patch: Partial<Mapping>) => void; onDelete: () => void }) => {
   const dataset = datasets.find((item) => item.id === mapping.sourceId);
   const columns = dataset?.columns ?? [];
   return <article className="mapping">
     <div className="mapping-head">
-      <select aria-label="图形类型" value={mapping.kind} onChange={(event) => onChange({ kind: event.target.value as MappingKind })}>
-        {kinds.map((kind) => <option key={kind.value} value={kind.value}>{kind.label}</option>)}
-      </select>
+      <select aria-label="图形类型" value={mapping.kind} onChange={(event) => onChange({ kind: event.target.value as MappingKind })}>{kinds.map((kind) => <option key={kind.value} value={kind.value}>{kind.label}</option>)}</select>
       <button className="icon-button danger" onClick={onDelete} aria-label={`移除 ${mapping.name}`}>×</button>
     </div>
     <div className="mapping-meta">
@@ -68,7 +94,7 @@ const MappingEditor = ({ mapping, sources, datasets, onChange, onDelete }: { map
       <label className="field color-field"><span>颜色</span><input aria-label="颜色" type="color" value={mapping.color} onChange={(event) => onChange({ color: event.target.value })} /></label>
     </div>
     <label className="field source-field"><span>数据源</span><select value={mapping.sourceId} onChange={(event) => onChange({ sourceId: event.target.value })}>{sources.map((source) => <option key={source.id} value={source.id}>{source.filename || source.id}</option>)}</select></label>
-    {!dataset && <p className="hint mapping-pending">载入“{sources.find((source) => source.id === mapping.sourceId)?.filename || mapping.sourceId}”后可选择列。</p>}
+    {!dataset && <p className="hint mapping-pending">选择工作区文件后会自动解析并提供列选择。</p>}
     {dataset && mapping.kind === 'candlestick' && <div className="mapping-fields">
       <ColumnField label="Open" value={mapping.openColumn} columns={columns} onChange={(openColumn) => onChange({ openColumn })} />
       <ColumnField label="High" value={mapping.highColumn} columns={columns} onChange={(highColumn) => onChange({ highColumn })} />
@@ -95,41 +121,40 @@ export default function App() {
   const [error, setError] = useState<string>();
   const [isLoading, setIsLoading] = useState(false);
   const configInput = useRef<HTMLInputElement>(null);
+  const datasetCache = useRef(new Map<string, Dataset>());
 
-  const loadDataFiles = async (files: File[], fileKeys = files.map((file) => file.name)) => {
-    if (files.length === 0) return;
-    setError(undefined);
-    setIsLoading(true);
-    try {
-      if (config.data.length === 0) {
-        const ids = sourceIdsFor(files);
-        const nextDatasets = await Promise.all(files.map((file, index) => readDataset(file, ids[index])));
-        if (nextDatasets.some((dataset) => dataset.columns.length === 0)) throw new Error('至少一个文件没有可读取的列。');
-        setDatasets(nextDatasets);
-        const initial = createInitialConfig(nextDatasets);
-        setConfig({ ...initial, data: initial.data.map((source, index) => ({ ...source, filename: fileKeys[index] })) });
-        setPreviewSourceId(nextDatasets[0].id);
-      } else {
-        const sources = files.map((file, index) => config.data.find((source) => source.filename === fileKeys[index]) ?? config.data.find((source) => source.filename === file.name));
-        const unknown = sources.findIndex((source) => !source);
-        if (unknown !== -1) throw new Error(`“${fileKeys[unknown]}”不在当前 JSON 的 data 文件清单中。请先新增该数据文件配置。`);
-        const nextDatasets = await Promise.all(files.map((file, index) => readDataset(file, sources[index]!.id)));
-        if (nextDatasets.some((dataset) => dataset.columns.length === 0)) throw new Error('至少一个文件没有可读取的列。');
-        setDatasets((current) => [...current.filter((dataset) => !nextDatasets.some((next) => next.id === dataset.id)), ...nextDatasets]);
-        setPreviewSourceId((current) => current ?? nextDatasets[0].id);
-      }
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '无法读取这个文件。');
-    } finally {
-      setIsLoading(false);
+  useEffect(() => {
+    let active = true;
+    if (!workspace) {
+      setDatasets([]);
+      return () => { active = false; };
     }
-  };
-
-  const loadFiles = async (event: ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files ?? []);
-    await loadDataFiles(files);
-    event.target.value = '';
-  };
+    const selected = config.data.flatMap((source) => {
+      const file = workspace.files.find((entry) => entry.path === source.filename);
+      return file ? [{ source, file }] : [];
+    });
+    const missing = config.data.filter((source) => source.filename && !selected.some((item) => item.source.id === source.id));
+    if (selected.length === 0) {
+      setDatasets([]);
+      setError(missing.length > 0 ? `工作区中未找到：${missing.map((source) => source.filename || source.id).join('、')}` : undefined);
+      return () => { active = false; };
+    }
+    setIsLoading(true);
+    Promise.all(selected.map(async ({ source, file }) => {
+      const cached = datasetCache.current.get(file.path);
+      if (cached) return { ...cached, id: source.id };
+      const dataset = await readDataset(await file.handle.getFile(), source.id);
+      datasetCache.current.set(file.path, dataset);
+      return dataset;
+    })).then((nextDatasets) => {
+      if (!active) return;
+      setDatasets(nextDatasets);
+      setError(missing.length > 0 ? `工作区中未找到：${missing.map((source) => source.filename || source.id).join('、')}` : undefined);
+    }).catch((cause) => {
+      if (active) setError(cause instanceof Error ? cause.message : '无法读取工作区中的数据文件。');
+    }).finally(() => { if (active) setIsLoading(false); });
+    return () => { active = false; };
+  }, [workspace, config.data]);
 
   const addWorkspace = async () => {
     const picker = (window as unknown as { showDirectoryPicker?: (options: { mode: 'read' }) => Promise<WorkspaceDirectoryHandle> }).showDirectoryPicker;
@@ -139,6 +164,7 @@ export default function App() {
     }
     try {
       const handle = await picker.call(window, { mode: 'read' });
+      datasetCache.current.clear();
       setWorkspace({ name: handle.name, handle, files: await indexWorkspace(handle) });
       setError(undefined);
     } catch (cause) {
@@ -152,6 +178,7 @@ export default function App() {
     try {
       if (await workspace.handle.requestPermission({ mode: 'read' }) !== 'granted') throw new Error('未获得工作区的只读权限。');
       const files = await indexWorkspace(workspace.handle);
+      datasetCache.current.clear();
       setWorkspace((current) => current ? { ...current, files } : current);
       setError(undefined);
     } catch (cause) {
@@ -159,43 +186,27 @@ export default function App() {
     }
   };
 
-  const loadWorkspaceFiles = async (files: WorkspaceFile[]) => loadDataFiles(await Promise.all(files.map((entry) => entry.handle.getFile())), files.map((entry) => entry.path));
-
   const updateMapping = (id: string, patch: Partial<Mapping>) => setConfig((current) => ({ ...current, mappings: current.mappings.map((item) => item.id === id ? { ...item, ...patch } : item) }));
 
   const addDataFile = () => setConfig((current) => {
     const number = Array.from({ length: current.data.length + 1 }, (_, index) => index + 1).find((value) => !current.data.some((source) => source.id === `data-${value}`))!;
     const id = `data-${number}`;
-    return { ...current, data: [...current.data, { id, filename: `data-${number}.csv`, timeColumn: '' }] };
+    return { ...current, data: [...current.data, { id, filename: '', timeColumn: '' }] };
   });
 
   const updateDataFile = (sourceId: string, patch: Partial<DataFileConfig>) => {
     const nextId = patch.id?.trim();
-    if (patch.id !== undefined && !nextId) {
-      setError('数据源 ID 不能为空。');
-      return;
-    }
-    if (nextId && nextId !== sourceId && config.data.some((source) => source.id === nextId)) {
-      setError(`数据源 ID “${nextId}”已存在。`);
-      return;
-    }
+    if (patch.id !== undefined && !nextId) return setError('数据源 ID 不能为空。');
+    if (nextId && nextId !== sourceId && config.data.some((source) => source.id === nextId)) return setError(`数据源 ID “${nextId}”已存在。`);
     const nextFilename = patch.filename?.trim();
-    if (patch.filename !== undefined && !nextFilename) {
-      setError('文件名不能为空。');
-      return;
-    }
-    if (nextFilename && config.data.some((source) => source.id !== sourceId && source.filename === nextFilename)) {
-      setError(`文件名“${nextFilename}”已被另一个数据源使用。`);
-      return;
-    }
+    if (patch.filename !== undefined && !nextFilename) return setError('请从工作区选择一个文件。');
+    if (nextFilename && config.data.some((source) => source.id !== sourceId && source.filename === nextFilename)) return setError(`工作区路径“${nextFilename}”已被另一个数据源使用。`);
     const resolvedId = nextId || sourceId;
     setConfig((current) => ({
       ...current,
       data: current.data.map((source) => source.id === sourceId ? { ...source, ...patch, id: resolvedId } : source),
       mappings: current.mappings.map((mapping) => mapping.sourceId === sourceId ? { ...mapping, sourceId: resolvedId } : mapping),
     }));
-    if (resolvedId !== sourceId) setDatasets((current) => current.map((dataset) => dataset.id === sourceId ? { ...dataset, id: resolvedId } : dataset));
-    if (patch.filename !== undefined) setDatasets((current) => current.filter((dataset) => dataset.id !== resolvedId));
     if (previewSourceId === sourceId) setPreviewSourceId(resolvedId);
     setError(undefined);
   };
@@ -210,15 +221,7 @@ export default function App() {
     const file = event.target.files?.[0];
     if (!file) return;
     try {
-      const nextConfig = readConfig(await file.text());
-      const sourcesByFilename = new Map(nextConfig.data.map((source) => [source.filename, source]));
-      const nextDatasets = datasets.flatMap((dataset) => {
-        const source = sourcesByFilename.get(dataset.fileName);
-        return source ? [{ ...dataset, id: source.id }] : [];
-      });
-      setConfig(nextConfig);
-      setDatasets(nextDatasets);
-      setPreviewSourceId(nextDatasets[0]?.id);
+      setConfig(readConfig(await file.text()));
       setError(undefined);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '配置导入失败。');
@@ -233,7 +236,7 @@ export default function App() {
     <header className="topbar">
       <a className="brand" href="/" aria-label="TSV 首页"><span className="brand-mark">T</span><span>TSV</span></a>
       <div className="topbar-title"><span>时间序列工作台</span><em>浏览器本地解析 · 文件不会离开此设备</em></div>
-      <label className="primary-button upload"><input type="file" multiple accept=".csv,.parquet,.pq,text/csv,application/vnd.apache.parquet" onChange={loadFiles} />绑定本地文件</label>
+      <button className="primary-button" onClick={() => void addWorkspace()}>{workspace ? '更换工作区' : '添加工作区'}</button>
     </header>
 
     <section className="workspace">
@@ -242,27 +245,16 @@ export default function App() {
           <div className="section-title"><p className="section-label">本地工作区</p>{workspace && <span>{workspace.files.length} 个表格文件</span>}</div>
           {workspace ? <>
             <strong title={workspace.name}>{workspace.name}</strong>
-            <p className="hint">已获只读权限。索引包含子目录中的 CSV、Parquet 与 PQ 文件。</p>
-            <div className="workspace-actions">
-              <button className="secondary-button" onClick={() => void refreshWorkspace()}>刷新索引</button>
-              <button className="secondary-button" disabled={workspace.files.length === 0} onClick={() => void loadWorkspaceFiles(workspace.files)}>载入全部</button>
-            </div>
-            <details className="workspace-index">
-              <summary>环境索引 · {workspace.files.length} 个文件</summary>
-              <div className="workspace-file-list">
-                {workspace.files.map((file) => <div className="workspace-file" key={file.path}><code title={file.path}>{file.path}</code><button className="add-button" onClick={() => void loadWorkspaceFiles([file])}>绑定</button></div>)}
-              </div>
-            </details>
-          </> : <>
-            <p className="muted">选择一个本地目录后，TSV 只会索引并按需读取其中的表格文件。</p>
-            <button className="secondary-button add-workspace" onClick={() => void addWorkspace()}>添加工作区</button>
-          </>}
+            <p className="hint">已获只读权限。数据文件选择后会自动读取并缓存；索引包含子目录中的 CSV、Parquet 与 PQ 文件。</p>
+            <button className="secondary-button add-workspace" onClick={() => void refreshWorkspace()}>刷新索引</button>
+            <details className="workspace-index"><summary>环境索引 · {workspace.files.length} 个文件</summary><div className="workspace-file-list">{workspace.files.map((file) => <code key={file.path} title={file.path}>{file.path}</code>)}</div></details>
+          </> : <p className="muted">添加工作区后，从数据文件的路径选择器中搜索并选择文件。</p>}
         </div>
         <div className="sidebar-section data-summary">
           <div className="section-title"><p className="section-label">数据文件</p><span>{config.data.length}</span></div>
-          <p className="hint source-hint">这里直接编辑 JSON 的 data 数组。文件只在你主动选择后按文件名或工作区相对路径绑定，不会保存绝对路径或内容。</p>
-          <div className="source-list">{config.data.map((source) => <DataFileEditor key={source.id} source={source} dataset={datasets.find((dataset) => dataset.id === source.id)} onChange={(patch) => updateDataFile(source.id, patch)} onDelete={() => removeDataFile(source.id)} />)}</div>
-          {config.data.length === 0 && <p className="muted">新增数据文件，或直接载入文件自动生成清单。</p>}
+          <p className="hint source-hint">这里直接编辑 JSON 的 data 数组。选择工作区相对路径后，应用自动解析数据，不需要绑定动作。</p>
+          <div className="source-list">{config.data.map((source) => <DataFileEditor key={source.id} source={source} dataset={datasets.find((dataset) => dataset.id === source.id)} files={workspace?.files ?? []} workspaceReady={Boolean(workspace)} onChange={(patch) => updateDataFile(source.id, patch)} onDelete={() => removeDataFile(source.id)} />)}</div>
+          {config.data.length === 0 && <p className="muted">新增数据文件后，从工作区路径选择器中选择文件。</p>}
           <button className="add-button add-data-file" onClick={addDataFile}>+ 新增数据文件</button>
         </div>
         <div className="sidebar-section mapping-list">
@@ -276,26 +268,25 @@ export default function App() {
           <input ref={configInput} hidden type="file" accept="application/json,.json" onChange={importConfig} />
         </div>
       </aside>
-
       <section className="canvas-area">
         {error && <div className="notice error" role="alert">{error}</div>}
-        {isLoading && <div className="notice loading" role="status">正在浏览器中读取文件…</div>}
+        {isLoading && <div className="notice loading" role="status">正在读取工作区文件…</div>}
         {hasChart ? <div className="chart-layout">
-          <div className="chart-caption"><div><p className="section-label">复盘图表</p><h1>{datasets.length} 个已绑定文件 · {config.mappings.length} 个图层</h1></div><span>拖动缩放 · 十字线检查</span></div>
+          <div className="chart-caption"><div><p className="section-label">复盘图表</p><h1>{datasets.length} 个自动加载的数据文件 · {config.mappings.length} 个图层</h1></div><span>拖动缩放 · 十字线检查</span></div>
           <Chart datasets={datasets} config={config} />
           {previewDataset && <Preview dataset={previewDataset} datasets={datasets} selectedId={previewDataset.id} onSelect={setPreviewSourceId} />}
-        </div> : <EmptyState hasData={config.data.length > 0} onLoad={loadFiles} />}
+        </div> : <EmptyState hasWorkspace={Boolean(workspace)} hasData={config.data.length > 0} onAddWorkspace={addWorkspace} />}
       </section>
     </section>
   </main>;
 }
 
-const EmptyState = ({ hasData, onLoad }: { hasData: boolean; onLoad: (event: ChangeEvent<HTMLInputElement>) => void }) => <div className="empty-state">
+const EmptyState = ({ hasWorkspace, hasData, onAddWorkspace }: { hasWorkspace: boolean; hasData: boolean; onAddWorkspace: () => void }) => <div className="empty-state">
   <div className="empty-symbol">↗</div>
-  <p className="section-label">{hasData ? '等待本地文件绑定' : '本地时间序列复盘'}</p>
-  <h1>{hasData ? '选择与 data 文件名相同的本地文件。' : '把多份数据留在你的浏览器里。'}</h1>
-  <p>{hasData ? '左侧 JSON 清单已可编辑。绑定后，再为图层选择对应数据列。' : '一次载入多个 CSV 或 Parquet 文件开始。所有解析、配置与绘图都在当前浏览器标签页内完成。'}</p>
-  <label className="primary-button upload"><input type="file" multiple accept=".csv,.parquet,.pq,text/csv,application/vnd.apache.parquet" onChange={onLoad} />绑定 CSV 或 Parquet</label>
+  <p className="section-label">{hasWorkspace ? '选择数据路径' : '本地时间序列复盘'}</p>
+  <h1>{hasWorkspace ? (hasData ? '选择每个数据文件的工作区路径。' : '新增数据文件并选择工作区路径。') : '从一个本地工作区开始。'}</h1>
+  <p>{hasWorkspace ? '路径选定后会自动解析和缓存，可立即用于多个图层。' : 'TSV 只申请目录的读取权限，并递归索引 CSV 和 Parquet 文件。'}</p>
+  {!hasWorkspace && <button className="primary-button" onClick={() => void onAddWorkspace()}>添加工作区</button>}
 </div>;
 
 const Preview = ({ dataset, datasets, selectedId, onSelect }: { dataset: Dataset; datasets: Dataset[]; selectedId: string; onSelect: (id: string) => void }) => <section className="preview">

@@ -21,6 +21,16 @@ export type WorkspaceFile = {
 
 export const isTableFile = (name: string) => /\.(csv|parquet|pq)$/i.test(name);
 
+export const fuzzyPathMatch = (path: string, query: string) => {
+  let offset = 0;
+  for (const character of query.toLowerCase().replace(/\s/g, '')) {
+    offset = path.toLowerCase().indexOf(character, offset);
+    if (offset === -1) return false;
+    offset += 1;
+  }
+  return true;
+};
+
 export const indexWorkspace = async (directory: WorkspaceDirectoryHandle, prefix = ''): Promise<WorkspaceFile[]> => {
   const files: WorkspaceFile[] = [];
   for await (const [name, handle] of directory.entries()) {
