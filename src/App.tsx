@@ -145,11 +145,11 @@ export default function App() {
       <section className="canvas-area">
         {error && <div className="notice error" role="alert">{error}</div>}
         {isLoading && <div className="notice loading" role="status">正在浏览器中读取文件…</div>}
-        {hasChart ? <>
+        {hasChart ? <div className="chart-layout">
           <div className="chart-caption"><div><p className="section-label">复盘图表</p><h1>{dataset.fileName}</h1></div><span>拖动缩放 · 十字线检查</span></div>
           <Chart dataset={dataset} config={config} />
           <Preview dataset={dataset} />
-        </> : <EmptyState dataset={dataset} onLoad={loadFile} />}
+        </div> : <EmptyState dataset={dataset} onLoad={loadFile} />}
       </section>
     </section>
   </main>;
