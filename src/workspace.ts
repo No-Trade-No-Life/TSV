@@ -32,10 +32,6 @@ export const fuzzyPathMatch = (path: string, query: string) => {
   return true;
 };
 
-export const workspaceHash = (workspaceId: string) => `#workspace=${encodeURIComponent(workspaceId)}`;
-
-export const workspaceIdFromHash = (hash: string) => new URLSearchParams(hash.replace(/^#/, '')).get('workspace') ?? undefined;
-
 export const indexWorkspace = async (directory: WorkspaceDirectoryHandle, prefix = ''): Promise<WorkspaceFile[]> => {
   const files: WorkspaceFile[] = [];
   for await (const [name, handle] of directory.entries()) {
