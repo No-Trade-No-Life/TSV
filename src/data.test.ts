@@ -1,7 +1,7 @@
 import { File } from 'node:buffer';
 import { describe, expect, it } from 'vitest';
 import { parquetWriteBuffer } from 'hyparquet-writer';
-import { parseTime, readDataset, readConfig, toJson } from './data';
+import { parseTime, readDataset, readDatasetMetadata, readConfig, toJson } from './data';
 
 describe('本地数据读取', () => {
   it('读取 CSV', async () => {
@@ -30,6 +30,15 @@ describe('本地数据读取', () => {
     expect(dataset.columns).toEqual(['date', 'close', 'volume']);
     expect(parseTime(dataset.rows[0].date)).toBe(Math.floor(date.getTime() / 1000));
     expect(parseTime(dataset.rows[0].volume)).toBe(5942);
+  });
+
+  it('只读取 CSV 和 Parquet 的列 metadata', async () => {
+    const csv = new File(['timestamp,close\n1722470400000,11\n'], 'candles.csv', { type: 'text/csv' });
+    const parquet = new File([parquetWriteBuffer({ columnData: [{ name: 'date', data: [new Date('2026-07-17T09:31:00.000Z')], type: 'TIMESTAMP' }, { name: 'close', data: [7781.454], type: 'DOUBLE' }] })], 'IC8888.parquet');
+    const metadataOnly = (file: File) => ({ name: file.name, size: file.size, slice: file.slice.bind(file), arrayBuffer: async () => { throw new Error('不应读取完整文件'); } }) as unknown as globalThis.File;
+
+    await expect(readDatasetMetadata(metadataOnly(csv))).resolves.toMatchObject({ format: 'CSV', columns: ['timestamp', 'close'] });
+    await expect(readDatasetMetadata(metadataOnly(parquet))).resolves.toMatchObject({ format: 'Parquet', columns: ['date', 'close'] });
   });
 });
 

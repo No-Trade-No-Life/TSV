@@ -1,5 +1,5 @@
 import Papa from 'papaparse';
-import { parquetReadObjects } from 'hyparquet';
+import { parquetMetadataAsync, parquetReadObjects, parquetSchema, type AsyncBuffer } from 'hyparquet';
 import { compressors } from 'hyparquet-compressors';
 import type { Dataset, Mapping, Row, ViewerConfig, ViewConfig } from './types';
 
@@ -8,21 +8,50 @@ const id = () => crypto.randomUUID();
 const normaliseRows = (rows: Row[]) =>
   rows.filter((row) => Object.values(row).some((value) => value !== '' && value !== null && value !== undefined));
 
-export const readDataset = async (file: File, id = file.name): Promise<Dataset> => {
+export type DatasetMetadata = Pick<Dataset, 'fileName' | 'format' | 'columns'>;
+
+const formatFor = (file: File): DatasetMetadata['format'] | undefined => {
   const filename = file.name.toLowerCase();
-  if (filename.endsWith('.csv')) {
+  if (filename.endsWith('.csv')) return 'CSV';
+  if (filename.endsWith('.parquet') || filename.endsWith('.pq')) return 'Parquet';
+  return undefined;
+};
+
+const fileBuffer = (file: File): AsyncBuffer => ({
+  byteLength: file.size,
+  slice: (start, end) => file.slice(start, end).arrayBuffer(),
+});
+
+export const readDatasetMetadata = async (file: File): Promise<DatasetMetadata> => {
+  const format = formatFor(file);
+  if (format === 'CSV') {
+    const result = Papa.parse<Row>(await file.slice(0, 64 * 1024).text(), { header: true, preview: 1, skipEmptyLines: 'greedy' });
+    const columns = result.meta.fields ?? [];
+    if (columns.length === 0) throw new Error('CSV 缺少表头。');
+    return { fileName: file.name, format, columns };
+  }
+  if (format === 'Parquet') {
+    const metadata = await parquetMetadataAsync(fileBuffer(file), { initialFetchSize: 64 * 1024 });
+    return { fileName: file.name, format, columns: parquetSchema(metadata).children.map((column) => column.element.name) };
+  }
+  throw new Error('只支持 .csv、.parquet 或 .pq 文件。');
+};
+
+export const readDataset = async (file: File, id = file.name): Promise<Dataset> => {
+  const format = formatFor(file);
+  if (format === 'CSV') {
     const result = Papa.parse<Row>(await file.text(), {
       header: true,
       skipEmptyLines: 'greedy',
     });
     if (result.errors.length > 0) throw new Error(`CSV 解析失败：${result.errors[0].message}`);
     const rows = normaliseRows(result.data);
-    return { id, fileName: file.name, format: 'CSV', rows, columns: Object.keys(rows[0] ?? {}) };
+    return { id, fileName: file.name, format, rows, columns: Object.keys(rows[0] ?? {}) };
   }
-  if (filename.endsWith('.parquet') || filename.endsWith('.pq')) {
+  if (format === 'Parquet') {
     const arrayBuffer = await file.arrayBuffer();
     const rows = normaliseRows((await parquetReadObjects({ file: arrayBuffer, compressors })) as Row[]);
-    return { id, fileName: file.name, format: 'Parquet', rows, columns: Object.keys(rows[0] ?? {}) };
+    return { id, fileName: file.name, format, rows, columns: Object.keys(rows[0] ?? {}) };
   }
   throw new Error('只支持 .csv、.parquet 或 .pq 文件。');
 };
