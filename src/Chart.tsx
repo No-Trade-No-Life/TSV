@@ -7,13 +7,23 @@ import {
   createChart,
   createSeriesMarkers,
   type IChartApi,
+  type ISeriesApi,
+  type SeriesType,
   type Time,
   type TickMarkFormatter,
 } from 'lightweight-charts';
 import { parseNumber, parseTime } from './data';
 import type { Dataset, Mapping, Row, ViewerConfig } from './types';
+import type { VisibleRange } from './view-route';
 
-type Props = { datasets: Dataset[]; config: ViewerConfig };
+type Props = {
+  datasets: Dataset[];
+  config: ViewerConfig;
+  visibleRange?: VisibleRange;
+  focusTime?: number;
+  onVisibleRangeChange: (range: VisibleRange) => void;
+  onFocusTimeChange: (focusTime: number) => void;
+};
 export type ResolvedMapping = { dataset: Dataset; timeColumn: string; paneIndex: number; mapping: Mapping };
 export type PaneLegend = { paneIndex: number; paneName: string; entries: Array<{ name: string; color: string }> };
 type LegendItem = { series: unknown[]; value: HTMLOutputElement };
@@ -192,8 +202,36 @@ const attachPaneLegends = (container: HTMLDivElement, chart: IChartApi, config: 
   };
 };
 
-export const Chart = ({ datasets, config }: Props) => {
+const applyVisibleRange = (chart: IChartApi, visibleRange?: VisibleRange) => {
+  if (visibleRange) {
+    chart.timeScale().setVisibleRange({ from: visibleRange.startTime / 1000 as Time, to: visibleRange.endTime / 1000 as Time });
+    return;
+  }
+  chart.timeScale().fitContent();
+};
+
+const applyFocusTime = (chart: IChartApi, series: ISeriesApi<SeriesType> | null, focusTime?: number) => {
+  if (!series || focusTime === undefined) {
+    chart.clearCrosshairPosition();
+    return;
+  }
+  const point = series.data().find((item) => Number(item.time) === focusTime / 1000) as { value?: number; close?: number } | undefined;
+  const value = point?.value ?? point?.close;
+  if (value === undefined) {
+    chart.clearCrosshairPosition();
+    return;
+  }
+  chart.setCrosshairPosition(value, focusTime / 1000 as Time, series);
+};
+
+export const Chart = ({ datasets, config, visibleRange, focusTime, onVisibleRangeChange, onFocusTimeChange }: Props) => {
   const host = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const focusSeriesRef = useRef<ISeriesApi<SeriesType> | null>(null);
+  const onVisibleRangeChangeRef = useRef(onVisibleRangeChange);
+  const onFocusTimeChangeRef = useRef(onFocusTimeChange);
+  onVisibleRangeChangeRef.current = onVisibleRangeChange;
+  onFocusTimeChangeRef.current = onFocusTimeChange;
   useEffect(() => {
     if (!host.current) return undefined;
     const container = host.current;
@@ -211,6 +249,7 @@ export const Chart = ({ datasets, config }: Props) => {
       timeScale: { borderColor: '#3b4237', timeVisible: true, secondsVisible: false, tickMarkFormatter: localeTickMarkFormatter },
       crosshair: { vertLine: { color: '#c6dd6266' }, horzLine: { color: '#c6dd6266' } },
     });
+    chartRef.current = chart;
     const observer = new ResizeObserver(resize);
     observer.observe(container);
     resize();
@@ -221,14 +260,35 @@ export const Chart = ({ datasets, config }: Props) => {
     config.view.panes.slice(1).forEach(() => chart.addPane(true));
     const mappings = resolveMappings(datasets, config);
     const seriesByMapping = new Map(mappings.map(({ dataset, timeColumn, paneIndex, mapping }) => [mapping.id, addMapping(chart, dataset, timeColumn, paneIndex, mapping)]));
+    focusSeriesRef.current = seriesByMapping.values().next().value?.[0] as ISeriesApi<SeriesType> | undefined ?? null;
     const detachLegends = attachPaneLegends(container, chart, config, mappings, seriesByMapping);
-    chart.timeScale().fitContent();
+    applyVisibleRange(chart, visibleRange);
+    applyFocusTime(chart, focusSeriesRef.current, focusTime);
+    const onVisibleTimeRangeChange = (range: { from: Time; to: Time } | null) => {
+      if (!range || typeof range.from !== 'number' || typeof range.to !== 'number') return;
+      onVisibleRangeChangeRef.current({ startTime: Math.round(range.from * 1000), endTime: Math.round(range.to * 1000) });
+    };
+    const onClick = (parameter: { time?: Time }) => {
+      if (typeof parameter.time === 'number') onFocusTimeChangeRef.current(Math.round(parameter.time * 1000));
+    };
+    chart.timeScale().subscribeVisibleTimeRangeChange(onVisibleTimeRangeChange);
+    chart.subscribeClick(onClick);
     return () => {
       observer.disconnect();
       cancelAnimationFrame(frame);
       detachLegends();
+      chart.timeScale().unsubscribeVisibleTimeRangeChange(onVisibleTimeRangeChange);
+      chart.unsubscribeClick(onClick);
+      chartRef.current = null;
+      focusSeriesRef.current = null;
       chart.remove();
     };
   }, [datasets, config]);
+  useEffect(() => {
+    if (chartRef.current) applyVisibleRange(chartRef.current, visibleRange);
+  }, [visibleRange]);
+  useEffect(() => {
+    if (chartRef.current) applyFocusTime(chartRef.current, focusSeriesRef.current, focusTime);
+  }, [focusTime]);
   return <div className="chart-host" ref={host} aria-label="时间序列图表" />;
 };
