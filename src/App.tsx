@@ -4,7 +4,7 @@ import { createMapping, defaultView, readConfig, readDataset, readDatasetMetadat
 import type { DataFileConfig, Dataset, Mapping, MappingKind, PaneConfig, ViewerConfig } from './types';
 import { fuzzyPathMatch, indexWorkspace, initializeWorkspace, listWorkspaceViewFiles, writeWorkspaceConfig, writeWorkspaceViewFile, type WorkspaceConfig, type WorkspaceDirectoryHandle, type WorkspaceFile } from './workspace';
 import { deleteWorkspaceHandle, listWorkspaceHandles, saveWorkspaceHandle } from './workspace-store';
-import { viewHash, viewIdFromHash } from './view-route';
+import { shouldRestoreStoredView, viewHash, viewIdFromHash } from './view-route';
 
 const kinds: { value: MappingKind; label: string }[] = [
   { value: 'candlestick', label: 'OHLC 蜡烛图' },
@@ -128,10 +128,11 @@ export default function App() {
     return () => window.removeEventListener('hashchange', loadHashView);
   }, [applyStoredView, viewDrawerOpen, views]);
   useEffect(() => {
-    if (!workspacesReady || !viewWorkspaceId || views.some((view) => view.workspaceId === viewWorkspaceId && view.config.view.id === appliedConfig.view.id)) return;
+    const currentViewIsStored = views.some((view) => view.workspaceId === viewWorkspaceId && view.config.view.id === appliedConfig.view.id);
+    if (!workspacesReady || !viewWorkspaceId || !shouldRestoreStoredView(Boolean(viewSession), currentViewIsStored)) return;
     const fallback = views[0];
     if (fallback) applyStoredView(fallback);
-  }, [appliedConfig.view.id, applyStoredView, viewWorkspaceId, views, workspacesReady]);
+  }, [appliedConfig.view.id, applyStoredView, viewSession, viewWorkspaceId, views, workspacesReady]);
 
   const searchFiles = useMemo<SearchFile[]>(() => workspaces.filter((workspace): workspace is WorkspaceRuntime & { config: WorkspaceConfig } => workspace.permission === 'granted' && Boolean(workspace.config)).flatMap((workspace) => workspace.files.map((file) => ({ workspace, file }))), [workspaces]);
   useEffect(() => {
