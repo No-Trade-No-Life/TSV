@@ -251,7 +251,7 @@ export default function App() {
     } catch (cause) { setError(cause instanceof Error ? cause.message : '无法保存 View。'); }
   };
   const cancelViewEdit = () => {
-    if (viewSession) {
+    if (viewSession && (viewWorkspaceId !== viewSession.workspaceId || toJson(appliedConfig) !== toJson(viewSession.config))) {
       setViewWorkspaceId(viewSession.workspaceId);
       setAppliedConfig(cloneConfig(viewSession.config));
       setDraftConfig(cloneConfig(viewSession.config));
