@@ -16,6 +16,7 @@ import type { Dataset, Mapping, Row, ViewerConfig } from './types';
 type Props = { datasets: Dataset[]; config: ViewerConfig };
 export type ResolvedMapping = { dataset: Dataset; timeColumn: string; paneIndex: number; mapping: Mapping };
 export type PaneLegend = { paneIndex: number; paneName: string; entries: Array<{ name: string; color: string }> };
+type LegendItem = { series: unknown[]; value: HTMLOutputElement };
 
 export const resolveMappings = (datasets: Dataset[], config: ViewerConfig): ResolvedMapping[] =>
   config.mappings.flatMap((mapping) => {
@@ -65,6 +66,18 @@ const uniqueTimes = <T extends { time: Time }>(points: T[]) => {
   return [...latestByTime.values()].sort((left, right) => Number(left.time) - Number(right.time));
 };
 
+const formatLegendNumber = (value: unknown, locale = browserLocale()) => typeof value === 'number'
+  ? value.toLocaleString(locale, { maximumFractionDigits: 8 })
+  : '—';
+
+export const formatLegendValue = (value: unknown, locale = browserLocale()) => {
+  if (!value || typeof value !== 'object') return '—';
+  if ('open' in value && 'high' in value && 'low' in value && 'close' in value) {
+    return `O ${formatLegendNumber(value.open, locale)} H ${formatLegendNumber(value.high, locale)} L ${formatLegendNumber(value.low, locale)} C ${formatLegendNumber(value.close, locale)}`;
+  }
+  return 'value' in value ? formatLegendNumber(value.value, locale) : '—';
+};
+
 const addMapping = (chart: IChartApi, dataset: Dataset, timeColumn: string, paneIndex: number, mapping: Mapping) => {
   const rows = timeRows(dataset.rows, timeColumn);
   if (mapping.kind === 'candlestick') {
@@ -78,12 +91,12 @@ const addMapping = (chart: IChartApi, dataset: Dataset, timeColumn: string, pane
       const close = parseNumber(row[mapping.closeColumn ?? '']);
       return open === undefined || high === undefined || low === undefined || close === undefined ? [] : [{ time: time as Time, open, high, low, close }];
     })));
-    return;
+    return [series];
   }
   if (mapping.kind === 'histogram') {
     const series = chart.addSeries(HistogramSeries, { color: mapping.color, title: mapping.name, priceFormat: { type: 'price', precision: 4, minMove: 0.0001 } }, paneIndex);
     series.setData(valuePoints(dataset.rows, timeColumn, mapping.valueColumn));
-    return;
+    return [series];
   }
   if (mapping.kind === 'markers') {
     const series = chart.addSeries(LineSeries, { color: 'rgba(0,0,0,0)', lineVisible: false, lastValueVisible: false, priceLineVisible: false, title: mapping.name }, paneIndex);
@@ -93,53 +106,90 @@ const addMapping = (chart: IChartApi, dataset: Dataset, timeColumn: string, pane
       const value = parseNumber(row[mapping.valueColumn ?? '']);
       return value === undefined ? [] : [{ time: time as Time, position: 'inBar' as const, color: mapping.color, shape: 'circle' as const, text: String(row[mapping.textColumn ?? ''] ?? mapping.name) }];
     }));
-    return;
+    return [series];
   }
   if (mapping.kind === 'segment') {
-    rows.forEach(({ row, time }, index) => {
+    const series = rows.flatMap(({ row, time }, index) => {
       const startValue = parseNumber(row[mapping.valueColumn ?? '']);
       const endTime = parseTime(row[mapping.endTimeColumn ?? '']);
       const endValue = parseNumber(row[mapping.endValueColumn ?? '']);
-      if (startValue === undefined || endTime === undefined || endValue === undefined || endTime === time) return;
-      const series = chart.addSeries(LineSeries, {
+      if (startValue === undefined || endTime === undefined || endValue === undefined || endTime === time) return [];
+      const segment = chart.addSeries(LineSeries, {
         color: mapping.color,
         lineWidth: 2,
         lastValueVisible: false,
         priceLineVisible: false,
         title: index === 0 ? mapping.name : '',
       }, paneIndex);
-      series.setData([
+      segment.setData([
         { time: Math.min(time, endTime) as Time, value: time < endTime ? startValue : endValue },
         { time: Math.max(time, endTime) as Time, value: time < endTime ? endValue : startValue },
       ]);
+      return [segment];
     });
-    return;
+    return series;
   }
   const series = chart.addSeries(LineSeries, { color: mapping.color, lineWidth: 2, title: mapping.name }, paneIndex);
   series.setData(valuePoints(dataset.rows, timeColumn, mapping.valueColumn));
+  return [series];
 };
 
-const attachPaneLegends = (chart: IChartApi, config: ViewerConfig, mappings: ResolvedMapping[]) => {
+const attachPaneLegends = (container: HTMLDivElement, chart: IChartApi, config: ViewerConfig, mappings: ResolvedMapping[], seriesByMapping: Map<string, unknown[]>) => {
   const legends = resolvePaneLegends(mappings, config);
-  const elements = legends.flatMap((legend) => {
-    const pane = chart.panes()[legend.paneIndex]?.getHTMLElement();
-    if (!pane) return [];
-    const element = document.createElement('div');
-    element.className = 'chart-pane-legend';
-    const title = document.createElement('strong');
-    title.textContent = legend.paneName;
-    element.append(title);
-    legend.entries.forEach((entry) => {
-      const item = document.createElement('span');
-      const swatch = document.createElement('i');
-      swatch.style.backgroundColor = entry.color;
-      item.append(swatch, document.createTextNode(entry.name));
-      element.append(item);
-    });
-    pane.append(element);
-    return [element];
+  let elements: HTMLElement[] = [];
+  let items: LegendItem[] = [];
+  let crosshairData = new Map<unknown, unknown>();
+  const renderValues = () => items.forEach((item) => {
+    const value = item.series.map((series) => crosshairData.get(series)).find((data) => data !== undefined);
+    item.value.textContent = formatLegendValue(value);
   });
-  return () => elements.forEach((element) => element.remove());
+  const mount = () => {
+    elements.forEach((element) => element.remove());
+    elements = [];
+    items = [];
+    const anchors = [...container.querySelectorAll<HTMLTableCellElement>('table tr td:nth-child(2)')];
+    legends.forEach((legend) => {
+      const anchor = anchors[legend.paneIndex];
+      if (!anchor) return;
+      const element = document.createElement('div');
+      element.className = 'chart-pane-legend';
+      const title = document.createElement('strong');
+      title.textContent = legend.paneName;
+      element.append(title);
+      const paneMappings = mappings.filter((mapping) => mapping.paneIndex === legend.paneIndex);
+      legend.entries.forEach((entry, index) => {
+        const item = document.createElement('span');
+        const swatch = document.createElement('i');
+        swatch.style.backgroundColor = entry.color;
+        const name = document.createElement('b');
+        name.textContent = entry.name;
+        const value = document.createElement('output');
+        value.textContent = '—';
+        item.append(swatch, name, value);
+        element.append(item);
+        items.push({ series: seriesByMapping.get(paneMappings[index]?.mapping.id ?? '') ?? [], value });
+      });
+      anchor.append(element);
+      elements.push(element);
+    });
+    renderValues();
+  };
+  const observer = new MutationObserver((records) => {
+    if (records.some((record) => record.type === 'childList' && record.target instanceof HTMLTableElement)) mount();
+  });
+  observer.observe(container, { childList: true, subtree: true });
+  const frame = requestAnimationFrame(mount);
+  const onCrosshairMove = (parameter: { seriesData: Map<unknown, unknown> }) => {
+    crosshairData = parameter.seriesData;
+    renderValues();
+  };
+  chart.subscribeCrosshairMove(onCrosshairMove);
+  return () => {
+    observer.disconnect();
+    cancelAnimationFrame(frame);
+    chart.unsubscribeCrosshairMove(onCrosshairMove);
+    elements.forEach((element) => element.remove());
+  };
 };
 
 export const Chart = ({ datasets, config }: Props) => {
@@ -170,8 +220,8 @@ export const Chart = ({ datasets, config }: Props) => {
     });
     config.view.panes.slice(1).forEach(() => chart.addPane(true));
     const mappings = resolveMappings(datasets, config);
-    mappings.forEach(({ dataset, timeColumn, paneIndex, mapping }) => addMapping(chart, dataset, timeColumn, paneIndex, mapping));
-    const detachLegends = attachPaneLegends(chart, config, mappings);
+    const seriesByMapping = new Map(mappings.map(({ dataset, timeColumn, paneIndex, mapping }) => [mapping.id, addMapping(chart, dataset, timeColumn, paneIndex, mapping)]));
+    const detachLegends = attachPaneLegends(container, chart, config, mappings, seriesByMapping);
     chart.timeScale().fitContent();
     return () => {
       observer.disconnect();
