@@ -11,6 +11,8 @@ npm run dev
 
 ## 数据与图表配置
 
+外部程序直接生成工作区配置与 View 文件的格式见 [外部 View 集成](docs/external-views.md)。
+
 工作区由 App Header 的“工作区管理”弹窗统一管理。弹窗以表格展示名称、Workspace ID、Parquet/CSV 文件数量和权限状态；可以添加、改名、刷新授权或移除目录句柄。
 
 当前 View 的标题显示在 App Header。创建或编辑 View 会打开右侧 Drawer：数据文件、Pane 与图层都是草稿，顶部的“预览”只临时刷新图表，“保存”会写入 View 文件并应用，“取消”会恢复打开 Drawer 前的已保存状态。Drawer 打开时会轻量读取数据文件的列信息（CSV 表头或 Parquet schema），因此时间列和图层字段可立即选择；只有预览或保存才读取完整数据用于图表。Drawer 在桌面端占用最多 40% 的宽度，主图会同步缩放而不是被遮挡。数据文件包含稳定的 `id`、所属 `workspaceId`、工作区相对路径 `filename` 与自己的 `timeColumn`；图层通过 `sourceId` 引用它们。
