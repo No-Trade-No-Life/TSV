@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { resolveMappings } from './Chart';
+import { formatLocaleDate, resolveMappings, resolvePaneLegends } from './Chart';
+import type { Time } from 'lightweight-charts';
 import type { Dataset, ViewerConfig } from './types';
 
 describe('多数据源图层解析', () => {
@@ -23,5 +24,29 @@ describe('多数据源图层解析', () => {
       { dataset: { id: 'price.csv' }, timeColumn: 'date', paneIndex: 0, mapping: { id: 'price' } },
       { dataset: { id: 'signal.csv' }, timeColumn: 'timestamp', paneIndex: 1, mapping: { id: 'signal' } },
     ]);
+  });
+
+  it('为每个 Pane 分别生成 Legend', () => {
+    const datasets: Dataset[] = [{ id: 'price.csv', fileName: 'price.csv', format: 'CSV', columns: ['date', 'close'], rows: [] }];
+    const config: ViewerConfig = {
+      version: 4,
+      data: [{ id: 'price.csv', workspaceId: 'prices', filename: 'price.csv', timeColumn: 'date' }],
+      view: { id: 'view', name: '复盘', panes: [{ id: 'price', name: '主图' }, { id: 'volume', name: '成交量' }] },
+      mappings: [
+        { id: 'line', sourceId: 'price.csv', paneId: 'price', kind: 'line', name: '收盘', color: '#c6dd62', valueColumn: 'close' },
+        { id: 'histogram', sourceId: 'price.csv', paneId: 'volume', kind: 'histogram', name: '量能', color: '#72c7e8', valueColumn: 'close' },
+      ],
+    };
+
+    expect(resolvePaneLegends(resolveMappings(datasets, config), config)).toEqual([
+      { paneIndex: 0, paneName: '主图', entries: [{ name: '收盘', color: '#c6dd62' }] },
+      { paneIndex: 1, paneName: '成交量', entries: [{ name: '量能', color: '#72c7e8' }] },
+    ]);
+  });
+
+  it('按浏览器 locale 格式化时间轴日期', () => {
+    const time = 1_722_513_600;
+    expect(formatLocaleDate(time as Time, 'en-US')).toBe(new Date(time * 1000).toLocaleDateString('en-US'));
+    expect(formatLocaleDate(time as Time, 'zh-CN')).toBe(new Date(time * 1000).toLocaleDateString('zh-CN'));
   });
 });

@@ -8,12 +8,14 @@ import {
   createSeriesMarkers,
   type IChartApi,
   type Time,
+  type TickMarkFormatter,
 } from 'lightweight-charts';
 import { parseNumber, parseTime } from './data';
 import type { Dataset, Mapping, Row, ViewerConfig } from './types';
 
 type Props = { datasets: Dataset[]; config: ViewerConfig };
 export type ResolvedMapping = { dataset: Dataset; timeColumn: string; paneIndex: number; mapping: Mapping };
+export type PaneLegend = { paneIndex: number; paneName: string; entries: Array<{ name: string; color: string }> };
 
 export const resolveMappings = (datasets: Dataset[], config: ViewerConfig): ResolvedMapping[] =>
   config.mappings.flatMap((mapping) => {
@@ -22,6 +24,28 @@ export const resolveMappings = (datasets: Dataset[], config: ViewerConfig): Reso
     const paneIndex = config.view.panes.findIndex((pane) => pane.id === mapping.paneId);
     return dataset && source?.timeColumn && paneIndex !== -1 ? [{ dataset, timeColumn: source.timeColumn, paneIndex, mapping }] : [];
   });
+
+const legendColor = (mapping: Mapping) => mapping.kind === 'candlestick' ? '#c6dd62' : mapping.color;
+
+export const resolvePaneLegends = (mappings: ResolvedMapping[], config: ViewerConfig): PaneLegend[] =>
+  config.view.panes.map((pane, paneIndex) => ({
+    paneIndex,
+    paneName: pane.name,
+    entries: mappings.filter((item) => item.paneIndex === paneIndex).map(({ mapping }) => ({ name: mapping.name, color: legendColor(mapping) })),
+  })).filter((legend) => legend.entries.length > 0);
+
+const browserLocale = () => typeof navigator === 'undefined' ? 'en-US' : navigator.language;
+
+export const formatLocaleDate = (time: Time, locale = browserLocale()) => {
+  const date = typeof time === 'number'
+    ? new Date(time * 1000)
+    : typeof time === 'string'
+      ? new Date(time)
+      : new Date(time.year, time.month - 1, time.day);
+  return date.toLocaleDateString(locale);
+};
+
+const localeTickMarkFormatter: TickMarkFormatter = (time, _type, locale) => formatLocaleDate(time, locale);
 
 const timeRows = (rows: Row[], column: string) =>
   rows
@@ -95,6 +119,29 @@ const addMapping = (chart: IChartApi, dataset: Dataset, timeColumn: string, pane
   series.setData(valuePoints(dataset.rows, timeColumn, mapping.valueColumn));
 };
 
+const attachPaneLegends = (chart: IChartApi, config: ViewerConfig, mappings: ResolvedMapping[]) => {
+  const legends = resolvePaneLegends(mappings, config);
+  const elements = legends.flatMap((legend) => {
+    const pane = chart.panes()[legend.paneIndex]?.getHTMLElement();
+    if (!pane) return [];
+    const element = document.createElement('div');
+    element.className = 'chart-pane-legend';
+    const title = document.createElement('strong');
+    title.textContent = legend.paneName;
+    element.append(title);
+    legend.entries.forEach((entry) => {
+      const item = document.createElement('span');
+      const swatch = document.createElement('i');
+      swatch.style.backgroundColor = entry.color;
+      item.append(swatch, document.createTextNode(entry.name));
+      element.append(item);
+    });
+    pane.append(element);
+    return [element];
+  });
+  return () => elements.forEach((element) => element.remove());
+};
+
 export const Chart = ({ datasets, config }: Props) => {
   const host = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -110,7 +157,8 @@ export const Chart = ({ datasets, config }: Props) => {
       layout: { background: { type: ColorType.Solid, color: '#11140f' }, textColor: '#d9dfd2', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' },
       grid: { vertLines: { color: '#242a21' }, horzLines: { color: '#242a21' } },
       rightPriceScale: { borderColor: '#3b4237' },
-      timeScale: { borderColor: '#3b4237', timeVisible: true, secondsVisible: false },
+      localization: { locale: browserLocale(), timeFormatter: formatLocaleDate },
+      timeScale: { borderColor: '#3b4237', timeVisible: true, secondsVisible: false, tickMarkFormatter: localeTickMarkFormatter },
       crosshair: { vertLine: { color: '#c6dd6266' }, horzLine: { color: '#c6dd6266' } },
     });
     const observer = new ResizeObserver(resize);
@@ -121,11 +169,14 @@ export const Chart = ({ datasets, config }: Props) => {
       frame = requestAnimationFrame(resize);
     });
     config.view.panes.slice(1).forEach(() => chart.addPane(true));
-    resolveMappings(datasets, config).forEach(({ dataset, timeColumn, paneIndex, mapping }) => addMapping(chart, dataset, timeColumn, paneIndex, mapping));
+    const mappings = resolveMappings(datasets, config);
+    mappings.forEach(({ dataset, timeColumn, paneIndex, mapping }) => addMapping(chart, dataset, timeColumn, paneIndex, mapping));
+    const detachLegends = attachPaneLegends(chart, config, mappings);
     chart.timeScale().fitContent();
     return () => {
       observer.disconnect();
       cancelAnimationFrame(frame);
+      detachLegends();
       chart.remove();
     };
   }, [datasets, config]);
