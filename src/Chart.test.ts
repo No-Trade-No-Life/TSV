@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatLocaleDateTime, resolveMappings, resolvePaneLegends } from './Chart';
+import { formatLegendValue, formatLocaleDateTime, resolveMappings, resolvePaneLegends } from './Chart';
 import type { Time } from 'lightweight-charts';
 import type { Dataset, ViewerConfig } from './types';
 
@@ -49,5 +49,10 @@ describe('多数据源图层解析', () => {
     const options = { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' } as const;
     expect(formatLocaleDateTime(time as Time, 'en-US')).toBe(new Date(time * 1000).toLocaleString('en-US', options));
     expect(formatLocaleDateTime(time as Time, 'zh-CN')).toBe(new Date(time * 1000).toLocaleString('zh-CN', options));
+  });
+
+  it('格式化 Crosshair 上的单值与 OHLC 值', () => {
+    expect(formatLegendValue({ value: 12.3456 }, 'en-US')).toBe('12.3456');
+    expect(formatLegendValue({ open: 12, high: 13, low: 11, close: 12.5 }, 'en-US')).toBe('O 12 H 13 L 11 C 12.5');
   });
 });

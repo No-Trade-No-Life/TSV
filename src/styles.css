@@ -67,9 +67,6 @@ button:focus-visible, input:focus-visible { outline: 2px solid oklch(0.82 0.13 1
 }
 .brand { display: inline-flex; align-items: center; gap: 9px; flex: 0 0 auto; color: oklch(0.94 0.01 110); font-size: 15px; font-weight: 800; letter-spacing: -0.03em; text-decoration: none; }
 .brand-mark { display: grid; place-items: center; width: 27px; height: 27px; border-radius: 8px; background: oklch(0.82 0.13 110); color: oklch(0.17 0.02 110); font-family: ui-monospace, monospace; font-size: 14px; font-weight: 900; }
-.topbar-title { display: grid; min-width: 0; margin-left: 8px; line-height: 1.2; }
-.topbar-title > span { overflow: hidden; color: oklch(0.87 0.018 110); font-size: 14px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
-.topbar-title em { overflow: hidden; color: oklch(0.57 0.015 110); font-family: ui-monospace, monospace; font-size: 10px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
 .view-switcher { min-width: min(190px, 20vw); }
 .view-switcher > [data-slot='select-trigger'] { width: 100%; }
 .topbar-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
@@ -105,9 +102,11 @@ button:focus-visible, input:focus-visible { outline: 2px solid oklch(0.82 0.13 1
 .chart-caption h1 { margin: 0; color: oklch(0.94 0.01 110); font-size: 20px; font-weight: 650; letter-spacing: -0.025em; }
 .chart-caption > span, .section-title > span { color: oklch(0.69 0.02 110); font-family: ui-monospace, monospace; font-size: 11px; }
 .chart-host { width: 100%; min-width: 0; min-height: 0; height: 100%; border: 1px solid oklch(0.28 0.015 110); border-radius: 12px; overflow: hidden; background: oklch(0.12 0.008 110); }
-.chart-pane-legend { position: absolute; z-index: 1; top: 10px; left: 10px; display: flex; max-width: calc(100% - 82px); align-items: center; gap: 9px; overflow: hidden; padding: 5px 7px; border: 1px solid oklch(0.31 0.015 110 / 0.8); border-radius: 6px; color: oklch(0.82 0.018 110); background: oklch(0.1 0.008 110 / 0.84); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; line-height: 1; pointer-events: none; }
+.chart-pane-legend { position: absolute; z-index: 10; top: 0; left: 12px; display: flex; max-width: calc(100% - 82px); align-items: center; gap: 9px; overflow: hidden; padding: 5px 7px; border: 1px solid oklch(0.31 0.015 110 / 0.8); border-radius: 6px; color: oklch(0.82 0.018 110); background: oklch(0.1 0.008 110 / 0.84); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; line-height: 1; pointer-events: none; }
 .chart-pane-legend strong { flex: 0 0 auto; color: oklch(0.93 0.02 110); font-weight: 700; }
 .chart-pane-legend span { display: inline-flex; min-width: 0; align-items: center; gap: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chart-pane-legend b { overflow: hidden; font-weight: 500; text-overflow: ellipsis; }
+.chart-pane-legend output { color: oklch(0.94 0.03 110); font: inherit; }
 .chart-pane-legend i { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; }
 
 .notice { margin: 0 0 14px; padding: 11px 13px; border-radius: 8px; font-size: 13px; }
@@ -214,7 +213,6 @@ button:focus-visible, input:focus-visible { outline: 2px solid oklch(0.82 0.13 1
 @media (max-width: 1050px) {
   .app-shell { --drawer-width: min(46vw, 640px); }
   .topbar { padding: 0 16px; }
-  .topbar-title { max-width: 22vw; }
   .topbar-actions { gap: 5px; }
   .topbar-actions .secondary-button, .topbar-actions .primary-button { padding: 0 9px; font-size: 12px; }
 }
@@ -222,7 +220,6 @@ button:focus-visible, input:focus-visible { outline: 2px solid oklch(0.82 0.13 1
 @media (max-width: 800px) {
   .app-shell.view-drawer-open { padding-right: 0; }
   .topbar { height: auto; min-height: 62px; flex-wrap: wrap; padding: 10px 14px; }
-  .topbar-title { display: none; }
   .view-switcher { min-width: 0; flex: 1; }
   .topbar-actions { width: 100%; margin-left: 0; }
   .topbar-actions > * { flex: 1; }
