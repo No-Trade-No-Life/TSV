@@ -5,7 +5,7 @@ import { createMapping, defaultView, readConfig, readDataset, readDatasetMetadat
 import type { DataFileConfig, Dataset, Mapping, MappingKind, PaneConfig, ViewerConfig } from './types';
 import { fuzzyPathMatch, indexWorkspace, initializeWorkspace, listWorkspaceViewFiles, writeWorkspaceConfig, writeWorkspaceViewFile, type WorkspaceConfig, type WorkspaceDirectoryHandle, type WorkspaceFile } from './workspace';
 import { deleteWorkspaceHandle, listWorkspaceHandles, saveWorkspaceHandle } from './workspace-store';
-import { shouldRestoreStoredView, viewHash, viewIdFromHash } from './view-route';
+import { shouldRestoreStoredView, viewHash, viewRouteFromHash, type ViewRoute, type VisibleRange } from './view-route';
 
 const kinds: { value: MappingKind; label: string }[] = [
   { value: 'candlestick', label: 'OHLC 蜡烛图' },
@@ -19,7 +19,7 @@ const empty: ViewerConfig = { version: 4, data: [], view: defaultView(), mapping
 type WorkspaceRuntime = { handleKey: number; handle: WorkspaceDirectoryHandle; config?: WorkspaceConfig; files: WorkspaceFile[]; permission: PermissionState };
 type StoredView = { workspaceId: string; config: ViewerConfig };
 type SearchFile = { workspace: WorkspaceRuntime & { config: WorkspaceConfig }; file: WorkspaceFile };
-type ViewSession = { config: ViewerConfig; workspaceId?: string };
+type ViewSession = { config: ViewerConfig; workspaceId?: string; visibleRange?: VisibleRange; focusTime?: number };
 
 const cloneConfig = (config: ViewerConfig) => JSON.parse(toJson(config)) as ViewerConfig;
 const workspaceName = (workspace: WorkspaceRuntime) => workspace.config?.display_name ?? workspace.handle.name;
@@ -92,16 +92,20 @@ export default function App() {
   const [workspaceManagerOpen, setWorkspaceManagerOpen] = useState(false);
   const [viewDrawerOpen, setViewDrawerOpen] = useState(false);
   const [viewSession, setViewSession] = useState<ViewSession>();
+  const [visibleRange, setVisibleRange] = useState<VisibleRange>();
+  const [focusTime, setFocusTime] = useState<number>();
   const datasetCache = useRef(new Map<string, Dataset>());
   const metadataCache = useRef(new Map<string, DatasetMetadata>());
   const initializedView = useRef(false);
 
-  const setViewRoute = (viewId: string) => window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${viewHash(viewId)}`);
-  const applyStoredView = useCallback((view: StoredView, updateRoute = true) => {
+  const setViewRoute = (route: ViewRoute) => window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${viewHash(route)}`);
+  const applyStoredView = useCallback((view: StoredView, updateRoute = true, route: ViewRoute = {}) => {
     setViewWorkspaceId(view.workspaceId);
     setAppliedConfig(cloneConfig(view.config));
     setDraftConfig(cloneConfig(view.config));
-    if (updateRoute) setViewRoute(view.config.view.id);
+    setVisibleRange(route.visibleRange);
+    setFocusTime(route.focusTime);
+    if (updateRoute) setViewRoute({ viewId: view.config.view.id });
   }, []);
 
   const activateWorkspace = useCallback(async (handleKey: number, handle: WorkspaceDirectoryHandle, requestPermission: boolean) => {
@@ -125,13 +129,17 @@ export default function App() {
   useEffect(() => { listWorkspaceHandles().then((handles) => Promise.all(handles.map(({ key, handle }) => activateWorkspace(key, handle, false)))).catch((cause) => setError(cause instanceof Error ? cause.message : '无法读取已保存的工作区。')).finally(() => setWorkspacesReady(true)); }, [activateWorkspace]);
   useEffect(() => {
     if (!workspacesReady || initializedView.current || views.length === 0) return;
-    const requestedViewId = viewIdFromHash(window.location.hash);
-    const selected = views.find((view) => view.config.view.id === requestedViewId) ?? views[0];
+    const route = viewRouteFromHash(window.location.hash);
+    const selected = views.find((view) => view.config.view.id === route.viewId);
     initializedView.current = true;
-    applyStoredView(selected, selected.config.view.id !== requestedViewId);
+    applyStoredView(selected ?? views[0], !selected, selected ? route : {});
   }, [applyStoredView, views, workspacesReady]);
   useEffect(() => {
-    const loadHashView = () => { const selected = views.find((view) => view.config.view.id === viewIdFromHash(window.location.hash)); if (selected && !viewDrawerOpen) applyStoredView(selected, false); };
+    const loadHashView = () => {
+      const route = viewRouteFromHash(window.location.hash);
+      const selected = views.find((view) => view.config.view.id === route.viewId);
+      if (selected && !viewDrawerOpen) applyStoredView(selected, false, route);
+    };
     window.addEventListener('hashchange', loadHashView);
     return () => window.removeEventListener('hashchange', loadHashView);
   }, [applyStoredView, viewDrawerOpen, views]);
@@ -211,12 +219,14 @@ export default function App() {
     setViewWorkspaceId(undefined);
     setAppliedConfig(empty);
     setDraftConfig(empty);
+    setVisibleRange(undefined);
+    setFocusTime(undefined);
     window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
   };
 
   const openViewEditor = () => {
     if (!viewWorkspaceId) return setError('请先创建或选择一个 View。');
-    setViewSession({ config: cloneConfig(appliedConfig), workspaceId: viewWorkspaceId });
+    setViewSession({ config: cloneConfig(appliedConfig), workspaceId: viewWorkspaceId, visibleRange, focusTime });
     setDraftConfig(cloneConfig(appliedConfig));
     setViewDrawerOpen(true);
     setError(undefined);
@@ -224,7 +234,7 @@ export default function App() {
   const newView = () => {
     const workspace = workspaces.find((item): item is WorkspaceRuntime & { config: WorkspaceConfig } => item.permission === 'granted' && Boolean(item.config));
     if (!workspace) return setError('请先在工作区管理中添加并授权至少一个工作区。');
-    setViewSession({ config: cloneConfig(appliedConfig), workspaceId: viewWorkspaceId });
+    setViewSession({ config: cloneConfig(appliedConfig), workspaceId: viewWorkspaceId, visibleRange, focusTime });
     setViewWorkspaceId(workspace.config.workspace_id);
     setDraftConfig({ version: 4, data: [], view: { ...defaultView(), id: crypto.randomUUID(), name: '未命名 View' }, mappings: [] });
     setViewDrawerOpen(true);
@@ -246,7 +256,7 @@ export default function App() {
       setDatasets([]);
       setViewDrawerOpen(false);
       setViewSession(undefined);
-      setViewRoute(config.view.id);
+      setViewRoute({ viewId: config.view.id, visibleRange, focusTime });
       setError(undefined);
     } catch (cause) { setError(cause instanceof Error ? cause.message : '无法保存 View。'); }
   };
@@ -255,7 +265,9 @@ export default function App() {
       setViewWorkspaceId(viewSession.workspaceId);
       setAppliedConfig(cloneConfig(viewSession.config));
       setDraftConfig(cloneConfig(viewSession.config));
-      if (viewSession.workspaceId) setViewRoute(viewSession.config.view.id);
+      setVisibleRange(viewSession.visibleRange);
+      setFocusTime(viewSession.focusTime);
+      if (viewSession.workspaceId) setViewRoute({ viewId: viewSession.config.view.id, visibleRange: viewSession.visibleRange, focusTime: viewSession.focusTime });
     }
     setViewDrawerOpen(false);
     setViewSession(undefined);
@@ -270,7 +282,7 @@ export default function App() {
   const hasChart = appliedConfig.mappings.some((mapping) => datasets.some((dataset) => dataset.id === mapping.sourceId) && appliedConfig.data.some((source) => source.id === mapping.sourceId && source.timeColumn));
   const drawerDirty = toJson(appliedConfig) !== toJson(draftConfig);
   const hasGrantedWorkspace = workspaces.some((workspace) => workspace.permission === 'granted' && workspace.config);
-  return <main className={viewDrawerOpen ? 'app-shell view-drawer-open' : 'app-shell'}><header className="topbar"><a className="brand" href="/" aria-label="TSV 首页"><span className="brand-mark">T</span><span>TSV</span></a><ViewSwitcher value={currentViewKey} views={views} disabled={viewDrawerOpen || views.length === 0} onSelect={applyStoredView} /><div className="topbar-actions"><button className="secondary-button" onClick={() => setWorkspaceManagerOpen(true)}>工作区管理</button><button className="secondary-button" disabled={!hasGrantedWorkspace} onClick={newView}>新建 View</button><button className="primary-button" disabled={!viewWorkspaceId} onClick={openViewEditor}>编辑 View</button></div></header><section className="workspace"><section className="canvas-area">{error && <div className="notice error" role="alert">{error}</div>}{isLoading && <div className="notice loading" role="status">正在读取工作区文件…</div>}{hasChart ? <div className="chart-layout"><Chart datasets={datasets} config={appliedConfig} /></div> : <EmptyState hasWorkspaces={workspaces.length > 0} hasView={Boolean(viewWorkspaceId)} onOpenWorkspaceManager={() => setWorkspaceManagerOpen(true)} onNewView={newView} />}</section></section>{workspaceManagerOpen && <WorkspaceManagerModal workspaces={workspaces} onAdd={() => void addWorkspace()} onRefresh={(workspace) => void refreshWorkspace(workspace)} onRename={(workspace, name) => void renameWorkspace(workspace, name)} onRemove={(workspace) => void removeWorkspace(workspace)} onClose={() => setWorkspaceManagerOpen(false)} />}{viewDrawerOpen && <ViewDrawer config={draftConfig} workspaceId={viewWorkspaceId} workspaces={workspaces} datasets={datasets} metadata={datasetMetadata} dirty={drawerDirty} isNew={!views.some((view) => view.workspaceId === viewWorkspaceId && view.config.view.id === draftConfig.view.id)} onChange={(update) => setDraftConfig((current) => update(current))} onSearch={setSearchTarget} onPreview={previewView} onSave={() => void saveView()} onCancel={cancelViewEdit} />}{searchTarget && <FileSearchModal files={searchFiles} target={searchTarget === 'new' ? undefined : searchTarget} onClose={() => setSearchTarget(undefined)} onChoose={chooseSearchFile} />}</main>;
+  return <main className={viewDrawerOpen ? 'app-shell view-drawer-open' : 'app-shell'}><header className="topbar"><a className="brand" href="/" aria-label="TSV 首页"><span className="brand-mark">T</span><span>TSV</span></a><ViewSwitcher value={currentViewKey} views={views} disabled={viewDrawerOpen || views.length === 0} onSelect={applyStoredView} /><div className="topbar-actions"><button className="secondary-button" onClick={() => setWorkspaceManagerOpen(true)}>工作区管理</button><button className="secondary-button" disabled={!hasGrantedWorkspace} onClick={newView}>新建 View</button><button className="primary-button" disabled={!viewWorkspaceId} onClick={openViewEditor}>编辑 View</button></div></header><section className="workspace"><section className="canvas-area">{error && <div className="notice error" role="alert">{error}</div>}{isLoading && <div className="notice loading" role="status">正在读取工作区文件…</div>}{hasChart ? <div className="chart-layout"><Chart datasets={datasets} config={appliedConfig} visibleRange={visibleRange} focusTime={focusTime} onVisibleRangeChange={(range) => { setVisibleRange((current) => current?.startTime === range.startTime && current.endTime === range.endTime ? current : range); setViewRoute({ viewId: appliedConfig.view.id, visibleRange: range, focusTime }); }} onFocusTimeChange={(nextFocusTime) => { setFocusTime(nextFocusTime); setViewRoute({ viewId: appliedConfig.view.id, visibleRange, focusTime: nextFocusTime }); }} /></div> : <EmptyState hasWorkspaces={workspaces.length > 0} hasView={Boolean(viewWorkspaceId)} onOpenWorkspaceManager={() => setWorkspaceManagerOpen(true)} onNewView={newView} />}</section></section>{workspaceManagerOpen && <WorkspaceManagerModal workspaces={workspaces} onAdd={() => void addWorkspace()} onRefresh={(workspace) => void refreshWorkspace(workspace)} onRename={(workspace, name) => void renameWorkspace(workspace, name)} onRemove={(workspace) => void removeWorkspace(workspace)} onClose={() => setWorkspaceManagerOpen(false)} />}{viewDrawerOpen && <ViewDrawer config={draftConfig} workspaceId={viewWorkspaceId} workspaces={workspaces} datasets={datasets} metadata={datasetMetadata} dirty={drawerDirty} isNew={!views.some((view) => view.workspaceId === viewWorkspaceId && view.config.view.id === draftConfig.view.id)} onChange={(update) => setDraftConfig((current) => update(current))} onSearch={setSearchTarget} onPreview={previewView} onSave={() => void saveView()} onCancel={cancelViewEdit} />}{searchTarget && <FileSearchModal files={searchFiles} target={searchTarget === 'new' ? undefined : searchTarget} onClose={() => setSearchTarget(undefined)} onChoose={chooseSearchFile} />}</main>;
 }
 
 const EmptyState = ({ hasWorkspaces, hasView, onOpenWorkspaceManager, onNewView }: { hasWorkspaces: boolean; hasView: boolean; onOpenWorkspaceManager: () => void; onNewView: () => void }) => <div className="empty-state"><div className="empty-symbol">↗</div><p className="section-label">本地时间序列复盘</p><h1>{hasView ? '编辑 View 并预览图表。' : hasWorkspaces ? '新建 View，然后搜索数据文件。' : '从一个可写的本地工作区开始。'}</h1><p>工作区身份和 View 文件都存储在本地目录中，跨机器同步时保持一致。</p>{hasWorkspaces ? <button className="primary-button" onClick={onNewView}>新建 View</button> : <button className="primary-button" onClick={onOpenWorkspaceManager}>工作区管理</button>}</div>;
