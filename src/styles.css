@@ -97,10 +97,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid oklch(0.82 0.13 1
 
 .workspace { height: calc(100dvh - 68px); min-height: 0; }
 .canvas-area { display: flex; min-width: 0; min-height: 0; height: 100%; flex-direction: column; padding: 30px clamp(20px, 4vw, 58px) 48px; overflow: hidden; background: oklch(0.105 0 0); }
-.chart-layout { display: grid; min-height: 0; flex: 1; grid-template-rows: auto minmax(0, 1fr); }
-.chart-caption { display: flex; width: 100%; align-items: end; justify-content: space-between; gap: 16px; margin: 0 auto 18px; }
-.chart-caption h1 { margin: 0; color: oklch(0.94 0.01 110); font-size: 20px; font-weight: 650; letter-spacing: -0.025em; }
-.chart-caption > span, .section-title > span { color: oklch(0.69 0.02 110); font-family: ui-monospace, monospace; font-size: 11px; }
+.chart-layout { display: grid; min-height: 0; flex: 1; grid-template-rows: minmax(0, 1fr); }
+.section-title > span { color: oklch(0.69 0.02 110); font-family: ui-monospace, monospace; font-size: 11px; }
 .chart-host { width: 100%; min-width: 0; min-height: 0; height: 100%; border: 1px solid oklch(0.28 0.015 110); border-radius: 12px; overflow: hidden; background: oklch(0.12 0.008 110); }
 .chart-pane-legend { position: absolute; z-index: 10; top: 0; left: 12px; display: flex; max-width: calc(100% - 82px); align-items: center; gap: 9px; overflow: hidden; padding: 5px 7px; border: 1px solid oklch(0.31 0.015 110 / 0.8); border-radius: 6px; color: oklch(0.82 0.018 110); background: oklch(0.1 0.008 110 / 0.84); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; line-height: 1; pointer-events: none; }
 .chart-pane-legend strong { flex: 0 0 auto; color: oklch(0.93 0.02 110); font-weight: 700; }
@@ -227,7 +225,6 @@ button:focus-visible, input:focus-visible { outline: 2px solid oklch(0.82 0.13 1
   .canvas-area { min-height: calc(100dvh - 118px); height: auto; padding: 24px 16px 38px; overflow: visible; }
   .chart-layout { display: block; }
   .chart-host { min-height: 420px; height: 420px; }
-  .chart-caption { align-items: start; flex-direction: column; }
   .empty-state { margin-top: 70px; }
   .modal-backdrop { padding: 12px; }
   .workspace-manager-modal { max-height: calc(100dvh - 24px); padding: 14px; }
