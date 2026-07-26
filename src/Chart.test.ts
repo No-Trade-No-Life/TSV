@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatLocaleDate, resolveMappings, resolvePaneLegends } from './Chart';
+import { formatLocaleDateTime, resolveMappings, resolvePaneLegends } from './Chart';
 import type { Time } from 'lightweight-charts';
 import type { Dataset, ViewerConfig } from './types';
 
@@ -44,9 +44,10 @@ describe('多数据源图层解析', () => {
     ]);
   });
 
-  it('按浏览器 locale 格式化时间轴日期', () => {
-    const time = 1_722_513_600;
-    expect(formatLocaleDate(time as Time, 'en-US')).toBe(new Date(time * 1000).toLocaleDateString('en-US'));
-    expect(formatLocaleDate(time as Time, 'zh-CN')).toBe(new Date(time * 1000).toLocaleDateString('zh-CN'));
+  it('按浏览器 locale 格式化精确到分钟的时间轴日期', () => {
+    const time = 1_722_513_659;
+    const options = { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' } as const;
+    expect(formatLocaleDateTime(time as Time, 'en-US')).toBe(new Date(time * 1000).toLocaleString('en-US', options));
+    expect(formatLocaleDateTime(time as Time, 'zh-CN')).toBe(new Date(time * 1000).toLocaleString('zh-CN', options));
   });
 });

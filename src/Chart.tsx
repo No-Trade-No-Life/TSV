@@ -36,16 +36,16 @@ export const resolvePaneLegends = (mappings: ResolvedMapping[], config: ViewerCo
 
 const browserLocale = () => typeof navigator === 'undefined' ? 'en-US' : navigator.language;
 
-export const formatLocaleDate = (time: Time, locale = browserLocale()) => {
+export const formatLocaleDateTime = (time: Time, locale = browserLocale()) => {
   const date = typeof time === 'number'
     ? new Date(time * 1000)
     : typeof time === 'string'
       ? new Date(time)
       : new Date(time.year, time.month - 1, time.day);
-  return date.toLocaleDateString(locale);
+  return date.toLocaleString(locale, { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 };
 
-const localeTickMarkFormatter: TickMarkFormatter = (time, _type, locale) => formatLocaleDate(time, locale);
+const localeTickMarkFormatter: TickMarkFormatter = (time, _type, locale) => formatLocaleDateTime(time, locale);
 
 const timeRows = (rows: Row[], column: string) =>
   rows
@@ -157,7 +157,7 @@ export const Chart = ({ datasets, config }: Props) => {
       layout: { background: { type: ColorType.Solid, color: '#11140f' }, textColor: '#d9dfd2', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' },
       grid: { vertLines: { color: '#242a21' }, horzLines: { color: '#242a21' } },
       rightPriceScale: { borderColor: '#3b4237' },
-      localization: { locale: browserLocale(), timeFormatter: formatLocaleDate },
+      localization: { locale: browserLocale(), timeFormatter: formatLocaleDateTime },
       timeScale: { borderColor: '#3b4237', timeVisible: true, secondsVisible: false, tickMarkFormatter: localeTickMarkFormatter },
       crosshair: { vertLine: { color: '#c6dd6266' }, horzLine: { color: '#c6dd6266' } },
     });
