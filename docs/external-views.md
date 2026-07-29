@@ -98,11 +98,37 @@
 
 ## 直接打开指定 View
 
-使用 View ID 作为 URL Hash：
+使用 URL Hash 传递 View 与可选的图表状态：
 
 ```text
-https://tsv.ntnl.io/#f32d7ef5-8bc1-4cd4-9f48-a2de9a4dcad2
+https://tsv.ntnl.io/#view_id=f32d7ef5-8bc1-4cd4-9f48-a2de9a4dcad2&start_time=1722513000000&end_time=1722516600000&focus_time=1722514200000
 ```
+
+`view_id` 是必填 UUID。`start_time` 和 `end_time` 为可选的 Unix 毫秒时间戳，用于恢复可见时间范围，且 `start_time` 必须小于 `end_time`。`focus_time` 为可选的 Unix 毫秒时间戳，对应用户在图表上点击的焦点时间，而不是鼠标悬浮位置。
 
 浏览器必须已经通过 TSV 添加并授权包含该 View 的工作区。Hash 只选择已扫描到的 View，不能替代浏览器的本地目录授权；若多个已授权工作区有同一个 View ID，TSV 会使用扫描列表中的第一个匹配项。
 
+## 通过 iframe 集成
+
+外部站点可以直接嵌入 TSV。父页面将完整 Hash 放到 iframe 的 `src`，即可指定初始 View、可见范围和焦点时间。
+
+```html
+<iframe
+  src="https://tsv.ntnl.io/#view_id=f32d7ef5-8bc1-4cd4-9f48-a2de9a4dcad2&start_time=1722513000000&end_time=1722516600000&focus_time=1722514200000"
+  allow="file-system-access"
+  title="时间序列复盘"
+  style="width: 100%; height: 720px; border: 0"
+></iframe>
+```
+
+`allow="file-system-access"` 将浏览器的文件系统访问权限委托给 TSV。不要为该 iframe 设置 `sandbox`；它会改变页面的安全上下文，并可能阻止本地目录权限和持久化存储正常工作。父页面自身的 Content Security Policy 也必须允许加载 `https://tsv.ntnl.io`。
+
+### 本地目录权限
+
+TSV 始终在 iframe 内部请求本地目录权限。父页面无法代替用户选择目录、读取目录内容或授权 `FileSystemDirectoryHandle`。用户需要在 iframe 中点击“工作区管理”，再添加和授权工作区。
+
+目录句柄保存在 `tsv.ntnl.io` 的浏览器存储中。部分浏览器会按顶层站点分区第三方 iframe 存储，因此不能假设用户在顶层打开 TSV 时的工作区，会自动出现在每个嵌入站点中。集成方应为用户提供首次在 iframe 内添加工作区的流程。
+
+### 集成边界
+
+父页面可以通过替换 iframe 的 `src` 改变 View 或图表状态。当前 TSV 没有 `postMessage` 协议，因此父页面不能读取工作区、控制已打开图表，或接收图表交互事件。
