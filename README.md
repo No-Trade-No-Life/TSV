@@ -5,8 +5,8 @@
 ## 本地开发
 
 ```bash
-npm install
-npm run dev
+pnpm install
+pnpm run dev
 ```
 
 ## 数据与图表配置
